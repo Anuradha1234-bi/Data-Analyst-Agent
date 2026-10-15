@@ -1,0 +1,101 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Pytest / Coverage
+.pytest_cache/
+backend/.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases, Backups & Journal files
+*.db
+*.db-*
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.qa_backup
+*.bak
+*.backup
+*.dump
+backend/data_analyst.db*
+data_analyst.db*
+test_prediction_tmp.db*
+
+# Uploaded Datasets Storage & User Data
+uploads/
+storage/
+backend/storage/
+
+# Trained Machine Learning Models & Artifacts
+models_storage/
+*.joblib
+*.pkl
+*.pickle
+*.onnx
+
+# Generated Reports & Output Exports
+reports/
+
+# Ad-hoc Scratch Scripts & Temporary Tools
+scratch/
+
+# Node & Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+frontend/.vite/
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files & Secrets (Allows only intentional .env.example templates)
+.env
+.env.*
+*.env
+*.env.*
+*.local
+!.env.example
+!**/.env.example
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
