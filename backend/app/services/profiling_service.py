@@ -1,4 +1,4 @@
-﻿"""Profiling Service - Orchestrates dataset loading, statistical distribution profiling, and quality diagnostics."""
+"""Profiling Service - Orchestrates dataset loading, statistical distribution profiling, and quality diagnostics."""
 
 import os
 from pathlib import Path
@@ -88,6 +88,9 @@ class ProfilingService:
                     q1=float(cp.numeric_stats.get("q1", 0.0)),
                     q3=float(cp.numeric_stats.get("q3", 0.0)),
                     iqr=float(cp.numeric_stats.get("iqr", 0.0)),
+                    valid_count=cp.numeric_stats.get("valid_count"),
+                    invalid_count=int(cp.numeric_stats.get("invalid_count", 0)),
+                    invalid_examples=list(cp.numeric_stats.get("invalid_examples", [])),
                 )
 
             cat_stats = None

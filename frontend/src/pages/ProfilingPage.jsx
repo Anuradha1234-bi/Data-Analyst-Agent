@@ -596,7 +596,11 @@ export const ProfilingPage = () => {
                   <div className="mt-2 text-xl font-bold text-[#0F172A]">
                     {multiResult.combined_overview.total_columns}
                   </div>
-                  <div className="mt-1 text-[10px] text-[#64748B]">Combined attributes</div>
+                  <div className="mt-1 text-[10px] text-[#64748B]">
+                    {multiResult.combined_overview.distinct_columns
+                      ? `${multiResult.combined_overview.distinct_columns} distinct schema columns`
+                      : 'Combined attributes'}
+                  </div>
                 </div>
 
                 {/* Combined Missing Values */}
@@ -953,10 +957,10 @@ export const ProfilingPage = () => {
                 <div>
                   <h3 className="text-sm font-bold text-[#0F172A] flex items-center gap-2">
                     <GitMerge className="w-4 h-4 text-[#2563EB]" />
-                    <span>Discovered Relational Keys & Foreign Key Links</span>
+                    <span>Discovered Relational Keys & Candidate Joins</span>
                   </h3>
                   <p className="text-xs text-[#64748B] mt-0.5">
-                    Evaluated from actual value overlap, uniqueness, and normalized column identities.
+                    Evaluated from actual value overlap, cardinality, and normalized key distributions. Candidate matches indicate structural value overlap; domain confirmation is recommended prior to production joins.
                   </p>
                 </div>
                 <button
@@ -973,15 +977,46 @@ export const ProfilingPage = () => {
                   <GitMerge className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                   <h4 className="text-sm font-bold text-[#0F172A]">No Relational Links Detected</h4>
                   <p className="text-xs text-[#64748B] max-w-md mx-auto mt-1 leading-relaxed">
-                    Scan complete: No strong column relationships detected among the selected datasets based on matching values and primary/foreign key attributes.
+                    Scan complete: No strong column relationships detected among the selected datasets based on matching values and key attributes.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {multiResult.relationships.map((rel, idx) => {
-                    const isM2M = rel.cardinality_symbol === 'M:N';
-                    const is11 = rel.cardinality_symbol === '1:1';
-                    const is1N = rel.cardinality_symbol === '1:N';
+                    const isM2M = rel.cardinality_symbol === 'M:N' || rel.cardinality === 'Many-to-Many';
+                    const is11 = rel.cardinality_symbol === '1:1' || rel.cardinality === 'One-to-One';
+                    const is1N = rel.cardinality_symbol === '1:N' || rel.cardinality === 'One-to-Many';
+                    const isN1 = rel.cardinality_symbol === 'N:1' || rel.cardinality === 'Many-to-One';
+
+                    // Confidence score resolution: handles numeric confidence_score (0-100), confidence_pct, or number confidence
+                    const rawScore = Number(rel.confidence_score ?? rel.confidence_pct ?? (typeof rel.confidence === 'number' ? rel.confidence * 100 : null));
+                    const confidenceDisplay = Number.isFinite(rawScore)
+                      ? `${Math.round(rawScore)}%`
+                      : (typeof rel.confidence === 'string' && rel.confidence.trim() ? rel.confidence : 'N/A');
+
+                    // Dataset names resolution: never blank
+                    const sourceDatasetName = rel.source_dataset_name || rel.source_dataset || 'Dataset A';
+                    const targetDatasetName = rel.target_dataset_name || rel.target_dataset || 'Dataset B';
+
+                    // Uniqueness resolution
+                    const isSourceUnique = Boolean(rel.source_unique ?? rel.source_is_pk_candidate ?? (is11 || is1N));
+                    const isTargetUnique = Boolean(rel.target_unique ?? rel.target_is_pk_candidate ?? (is11 || isN1));
+
+                    // Key role labels: avoid claiming confirmed PK/FK on unverified CSV data
+                    const sourceKeyRole = rel.source_pk_fk_hint || (isSourceUnique ? (is1N ? 'Candidate Unique Key (1-side)' : 'Candidate Unique Key') : (isM2M ? 'Repeated Join Key' : 'Repeated Key (N-side)'));
+                    const targetKeyRole = rel.target_pk_fk_hint || (isTargetUnique ? (isN1 ? 'Candidate Unique Key (1-side)' : 'Candidate Unique Key') : (isM2M ? 'Repeated Join Key' : 'Repeated Key (N-side)'));
+
+                    // Overlap percentage resolution: never undefined%
+                    const overlapVal = Number(rel.value_overlap_pct ?? rel.overlap_score ?? 0);
+                    const overlapDisplay = Number.isFinite(overlapVal) ? `${overlapVal.toFixed(1)}%` : '0%';
+
+                    // Matching keys, unmatched distinct keys, and join simulation rows
+                    const matchingKeysCount = Number(rel.matching_values_count || 0);
+                    const unmatchedSource = Number(rel.unmatched_values_source ?? rel.unmatched_source_count ?? 0);
+                    const unmatchedTarget = Number(rel.unmatched_values_target ?? rel.unmatched_target_count ?? 0);
+                    const innerRows = rel.estimated_inner_join_rows != null ? Number(rel.estimated_inner_join_rows) : null;
+                    const leftRows = rel.estimated_left_join_rows != null ? Number(rel.estimated_left_join_rows) : null;
+                    const isSafe = Boolean(rel.safe_for_join && !isM2M);
 
                     return (
                       <div
@@ -994,78 +1029,123 @@ export const ProfilingPage = () => {
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                                 is11
                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : is1N
+                                  : is1N || isN1
                                   ? 'bg-blue-50 text-blue-700 border-blue-200'
                                   : isM2M
-                                  ? 'bg-red-50 text-red-700 border-red-200'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
                                   : 'bg-purple-50 text-purple-700 border-purple-200'
                               }`}
                             >
-                              {rel.cardinality_symbol} · {rel.relationship_type}
+                              {rel.cardinality_symbol || (is11 ? '1:1' : is1N ? '1:N' : isN1 ? 'N:1' : isM2M ? 'M:N' : '?')} · {rel.relationship_type || rel.cardinality || 'Linkage'}
                             </span>
-                            {rel.is_candidate && (
+                            {rel.is_recommended && (
+                              <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Recommended Key
+                              </span>
+                            )}
+                            {rel.is_candidate && !rel.is_recommended && (
                               <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                                 Candidate Match
                               </span>
                             )}
                           </div>
-                          <span className="text-xs font-bold text-[#2563EB]">
-                            {(rel.confidence * 100).toFixed(0)}% Confidence
-                          </span>
+                          <div className="text-right">
+                            <span
+                              className="text-xs font-bold text-[#2563EB] cursor-help"
+                              title="Relationship Confidence evaluates column name semantics (35%), value overlap (40%), type compatibility (15%), and key uniqueness (10%). Note: Overlap percentage measures shared keys, not overall relationship validity."
+                            >
+                              {confidenceDisplay} Confidence
+                            </span>
+                            <div className="text-[9px] text-[#64748B]">
+                              {overlapDisplay} Key Overlap
+                            </div>
+                          </div>
                         </div>
 
                         {/* Visual Source ↔ Target Diagram */}
                         <div className="grid grid-cols-5 items-center gap-2 py-2">
                           <div className="col-span-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                            <div className="text-[10px] text-[#64748B] truncate font-medium">
-                              {rel.source_dataset}
+                            <div className="text-[10px] text-[#64748B] truncate font-medium" title={sourceDatasetName}>
+                              {sourceDatasetName}
                             </div>
-                            <div className="text-xs font-bold text-[#0F172A] truncate mt-0.5">
+                            <div className="text-xs font-bold text-[#0F172A] truncate mt-0.5" title={rel.source_column}>
                               {rel.source_column}
                             </div>
-                            <div className="text-[9px] text-[#64748B] mt-0.5">
-                              {rel.source_unique ? 'Unique (PK)' : 'Repeated (FK)'}
+                            <div className="text-[9px] text-[#64748B] mt-0.5 font-medium">
+                              {sourceKeyRole}
                             </div>
                           </div>
 
                           <div className="flex flex-col items-center justify-center text-[#2563EB]">
                             <GitMerge className="w-4 h-4" />
-                            <span className="text-[9px] font-mono mt-0.5">{rel.cardinality_symbol}</span>
+                            <span className="text-[9px] font-mono mt-0.5">{rel.cardinality_symbol || (isM2M ? 'M:N' : '↔')}</span>
                           </div>
 
                           <div className="col-span-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                            <div className="text-[10px] text-[#64748B] truncate font-medium">
-                              {rel.target_dataset}
+                            <div className="text-[10px] text-[#64748B] truncate font-medium" title={targetDatasetName}>
+                              {targetDatasetName}
                             </div>
-                            <div className="text-xs font-bold text-[#0F172A] truncate mt-0.5">
+                            <div className="text-xs font-bold text-[#0F172A] truncate mt-0.5" title={rel.target_column}>
                               {rel.target_column}
                             </div>
-                            <div className="text-[9px] text-[#64748B] mt-0.5">
-                              {rel.target_unique ? 'Unique (PK)' : 'Repeated (FK)'}
+                            <div className="text-[9px] text-[#64748B] mt-0.5 font-medium">
+                              {targetKeyRole}
                             </div>
                           </div>
                         </div>
 
                         {/* Cardinality explanation */}
-                        <p className="text-xs text-[#475569] leading-relaxed bg-[#F8FAFC] p-2.5 rounded-xl border border-slate-100">
-                          {rel.cardinality_explanation}
-                        </p>
+                        {rel.cardinality_explanation && (
+                          <p className="text-xs text-[#475569] leading-relaxed bg-[#F8FAFC] p-2.5 rounded-xl border border-slate-100">
+                            {rel.cardinality_explanation}
+                          </p>
+                        )}
 
-                        {/* Join Safety Status */}
-                        <div className="flex items-center justify-between pt-1 text-[11px]">
-                          <span className="text-[#64748B]">
-                            {rel.matching_values_count.toLocaleString()} matching keys ({rel.overlap_score}% overlap)
-                          </span>
-                          {rel.safe_for_join ? (
-                            <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Safe to Join</span>
+                        {/* Estimated join row counts */}
+                        {innerRows != null && (
+                          <div className="flex items-center justify-between text-[11px] text-[#475569] bg-slate-50/80 px-2.5 py-1.5 rounded-xl border border-slate-100">
+                            <span>Est. INNER JOIN: <strong className="text-[#0F172A]">{innerRows.toLocaleString()} rows</strong></span>
+                            {leftRows != null && (
+                              <span>Est. LEFT JOIN: <strong className="text-[#0F172A]">{leftRows.toLocaleString()} rows</strong></span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Warning messages if present */}
+                        {Array.isArray(rel.warning_messages) && rel.warning_messages.length > 0 && (
+                          <div className="text-[10px] text-amber-800 bg-amber-50/70 border border-amber-200/60 p-2 rounded-xl space-y-0.5">
+                            {rel.warning_messages.map((w, wIdx) => (
+                              <div key={wIdx} className="flex items-start gap-1">
+                                <span className="font-bold">•</span>
+                                <span>{w}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Join Safety Status & Distinct Key Breakdown */}
+                        <div className="space-y-1 pt-1 text-[11px]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[#64748B]">
+                              {matchingKeysCount.toLocaleString()} shared distinct keys ({overlapDisplay} overlap)
                             </span>
-                          ) : (
-                            <span className="text-red-600 font-semibold flex items-center gap-1">
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              <span>Row Explosion Risk</span>
-                            </span>
+                            {isSafe ? (
+                              <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Safe to Join</span>
+                              </span>
+                            ) : (
+                              <span className="text-amber-700 font-semibold flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                <span>{isM2M ? 'Row Multiplication Risk' : 'Join Caution'}</span>
+                              </span>
+                            )}
+                          </div>
+                          {(unmatchedSource > 0 || unmatchedTarget > 0) && (
+                            <div className="text-[10px] text-[#64748B] flex items-center justify-between bg-slate-50/50 px-2 py-0.5 rounded border border-slate-100">
+                              <span>Unmatched source: <strong>{unmatchedSource}</strong> key(s)</span>
+                              <span>Unmatched target: <strong>{unmatchedTarget}</strong> key(s)</span>
+                            </div>
                           )}
                         </div>
                       </div>

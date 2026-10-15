@@ -150,6 +150,10 @@ class RelationshipService:
                 confidence_label = "Weak / Uncertain"
                 conf_level = "LOW"
 
+            calc_score = getattr(rel, "confidence_score", calc_score)
+            if hasattr(rel, "confidence") and rel.confidence in ("HIGH", "MEDIUM", "LOW"):
+                conf_level = rel.confidence
+
             # Add PK / FK hints to reasons
             reasons = list(rel.confidence_reasons)
             if src_is_pk:
@@ -205,9 +209,21 @@ class RelationshipService:
                     unmatched_values_target=unmatched_target,
                     source_pk_fk_hint=src_pk_hint,
                     target_pk_fk_hint=tgt_pk_hint,
-                    cardinality_explanation=rel.cardinality_explanation or metrics.get("cardinality_explanation", ""),
-                    safe_for_join=rel.safe_for_join if hasattr(rel, "safe_for_join") else metrics.get("safe_for_join", True),
+                    cardinality_explanation=rel.cardinality_explanation or "",
+                    safe_for_join=rel.safe_for_join if hasattr(rel, "safe_for_join") else True,
                     is_candidate=rel.is_candidate if hasattr(rel, "is_candidate") else (conf_level == "LOW"),
+                    # Frontend compatibility aliases and simulated join metrics
+                    source_dataset=src_ds.filename,
+                    target_dataset=tgt_ds.filename,
+                    source_unique=rel.source_unique if hasattr(rel, "source_unique") else src_is_pk,
+                    target_unique=rel.target_unique if hasattr(rel, "target_unique") else tgt_is_pk,
+                    overlap_score=round(rel.value_overlap_pct, 2),
+                    confidence_pct=calc_score,
+                    estimated_inner_join_rows=getattr(rel, "estimated_inner_join_rows", None),
+                    estimated_left_join_rows=getattr(rel, "estimated_left_join_rows", None),
+                    join_expansion_factor=getattr(rel, "join_expansion_factor", None),
+                    unmatched_source_count=unmatched_source,
+                    unmatched_target_count=unmatched_target,
                 )
             )
 

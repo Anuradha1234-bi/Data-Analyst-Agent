@@ -61,9 +61,28 @@ class RelationshipDetector:
     DOMAIN_NATURAL_KEYS = {
         "customer", "employee", "product", "department", "user", "order", "invoice",
         "account", "supplier", "vendor", "client", "item", "student", "store",
-        "warehouse", "region", "district", "market", "state", "country", "city",
-        "commodity", "crop", "sku", "isbn", "vin", "upc", "email", "phone", "date",
-        "year", "name", "category", "code", "status", "shared_key", "zip", "postal_code"
+        "warehouse", "commodity", "crop", "sku", "isbn", "vin", "upc", "email", "phone",
+        "code", "shared_key"
+    }
+
+    # Attributes that represent metrics, low-cardinality demographics, timestamps, or unstructured text
+    # These must NOT be promoted to standalone entity join keys merely because names match.
+    NON_RELATIONAL_ATTRIBUTES = {
+        # Continuous numerical metrics & financial measures
+        "income", "annual_income", "annual_income_inr", "salary", "amount", "revenue",
+        "price", "cost", "tax", "total", "balance", "rate", "fee", "profit",
+        "discount", "score", "weight", "height", "age", "quantity", "qty",
+        "cgpa", "package", "duration", "hours", "units", "budget", "expenses",
+        # Generic low-cardinality categorical dimensions
+        "city", "state", "country", "status", "gender", "category", "type",
+        "role", "region", "district", "zone", "zipcode", "postal_code", "pin_code",
+        # Dates and timestamps
+        "signup_date", "created_at", "updated_at", "creation_date", "modified_date",
+        "birth_date", "dob", "timestamp", "datetime", "time", "login_time", "event_time", "date",
+        # Descriptive text & person names
+        "notes", "comment", "comments", "description", "desc", "remarks",
+        "memo", "text", "message", "details", "summary", "notes_text", "address", "street",
+        "customer_name", "client_name", "emp_name", "user_name"
     }
 
     NULL_STRINGS = {"", "nan", "null", "none", "na", "<na>", "n/a", "undefined", "nat"}
@@ -168,6 +187,25 @@ class RelationshipDetector:
         return False
 
     @classmethod
+    def is_non_relational_attribute(cls, col_name: str) -> bool:
+        """Check if column is a measure, demographic dimension, timestamp, or unstructured text.
+
+        These attributes must NOT be automatically promoted to standalone join keys.
+        """
+        if col_name is None:
+            return True
+        norm = cls._normalize_col_name(col_name)
+        if not norm:
+            return True
+        if norm in cls.NON_RELATIONAL_ATTRIBUTES or norm in cls.DESCRIPTIVE_TEXT_NAMES:
+            return True
+        if norm.endswith("_name") or norm == "name":
+            return True
+        if norm.endswith("_date") or norm.endswith("date") or norm.endswith("_time") or norm.endswith("time"):
+            return True
+        return False
+
+    @classmethod
     def detect_all_relationships(cls, datasets: Dict[str, pd.DataFrame]) -> List[Relationship]:
         """Inspect all pairs of datasets and discover candidate relationships with safeguards."""
         relationships: List[Relationship] = []
@@ -181,7 +219,7 @@ class RelationshipDetector:
         for ds_name, df in datasets.items():
             for col in df.columns:
                 series = df[col]
-                is_art = cls.is_artifact_column(col, series)
+                is_art = cls.is_artifact_column(col, series) or cls.is_non_relational_attribute(col)
                 if is_art:
                     col_cache[(ds_name, str(col))] = (None, set(), 0, 0, True)
                     continue
@@ -228,9 +266,9 @@ class RelationshipDetector:
 
         for col_a in df_a.columns:
             ca = col_cache.get((name_a, str(col_a))) if col_cache else None
-            if ca and ca[4]:  # is_artifact
+            if ca and ca[4]:  # is_artifact or non_relational
                 continue
-            elif not ca and cls.is_artifact_column(col_a, df_a[col_a]):
+            elif not ca and (cls.is_artifact_column(col_a, df_a[col_a]) or cls.is_non_relational_attribute(col_a)):
                 continue
 
             # Constant column check
@@ -242,7 +280,7 @@ class RelationshipDetector:
                 cb = col_cache.get((name_b, str(col_b))) if col_cache else None
                 if cb and cb[4]:
                     continue
-                elif not cb and cls.is_artifact_column(col_b, df_b[col_b]):
+                elif not cb and (cls.is_artifact_column(col_b, df_b[col_b]) or cls.is_non_relational_attribute(col_b)):
                     continue
 
                 # Fast disjoint set check: if columns share zero keys, reject in nanoseconds
@@ -264,6 +302,8 @@ class RelationshipDetector:
                 sem_match, sem_reason, name_score = cls._check_semantic_compatibility(
                     str(col_a), name_a, str(col_b), name_b
                 )
+                if not sem_match:
+                    continue
 
                 # 4. Calculate value metrics and overlap
                 metrics = cls._calculate_column_metrics(
@@ -283,18 +323,6 @@ class RelationshipDetector:
                     continue
 
                 overlap_pct = metrics["overlap_pct"]
-
-                # If columns do not share semantic alignment or normalized names:
-                if not sem_match:
-                    # Require at least 30% overlap for candidate consideration
-                    if overlap_pct < 30.0:
-                        continue
-                    # Never join continuous decimal float measures with different column names
-                    if pd.api.types.is_float_dtype(df_a[col_a]) or pd.api.types.is_float_dtype(df_b[col_b]):
-                        sample_a = df_a[col_a].dropna().head(30)
-                        sample_b = df_b[col_b].dropna().head(30)
-                        if (sample_a % 1 != 0).any() or (sample_b % 1 != 0).any():
-                            continue
 
                 # Discard candidate if both sides have virtually zero overlap (< 5%)
                 if overlap_pct < 5.0 and name_score < 30.0:
@@ -343,6 +371,10 @@ class RelationshipDetector:
                     safe_for_join=metrics.get("safe_for_join", True),
                     is_candidate=is_candidate_rel,
                 )
+                rel.confidence_score = confidence_score
+                rel.estimated_inner_join_rows = metrics.get("estimated_inner_join_rows", 0)
+                rel.estimated_left_join_rows = metrics.get("estimated_left_join_rows", 0)
+                rel.join_expansion_factor = metrics.get("join_expansion_factor", 1.0)
                 candidates.append(rel)
 
         return candidates
@@ -362,17 +394,23 @@ class RelationshipDetector:
         norm_a = cls._normalize_col_name(col_a)
         norm_b = cls._normalize_col_name(col_b)
 
-        # Reject descriptive text columns when names differ (e.g. 'notes' vs 'Status')
-        if norm_a in cls.DESCRIPTIVE_TEXT_NAMES or norm_b in cls.DESCRIPTIVE_TEXT_NAMES:
-            if norm_a != norm_b:
-                return False, f"Descriptive text column ('{col_a}') is not a join key", 0.0
+        # Reject non-relational attributes (measures, low-cardinality demographics, timestamps, descriptive text)
+        if norm_a in cls.NON_RELATIONAL_ATTRIBUTES or norm_b in cls.NON_RELATIONAL_ATTRIBUTES:
+            return False, f"Attribute ('{col_a}') is a measure, demographic dimension, or timestamp, not an entity join key", 0.0
 
-        # Exact normalized match: 'Customer ID' ↔ 'customer_id' ↔ 'CUSTOMER_ID'
-        if norm_a == norm_b:
-            return True, f"Matching column name ('{col_a}' <-> '{col_b}')", 35.0
+        if norm_a in cls.DESCRIPTIVE_TEXT_NAMES or norm_b in cls.DESCRIPTIVE_TEXT_NAMES:
+            return False, f"Descriptive text column ('{col_a}') is not a join key", 0.0
 
         concept_a, is_id_a = cls._extract_entity_and_concept(col_a, ds_a)
         concept_b, is_id_b = cls._extract_entity_and_concept(col_b, ds_b)
+
+        # Exact normalized match: 'Customer ID' ↔ 'customer_id' ↔ 'CUSTOMER_ID'
+        if norm_a == norm_b:
+            if is_id_a or is_id_b or norm_a in cls.GENERIC_ID_NAMES:
+                return True, f"Matching identifier column ('{col_a}' <-> '{col_b}')", 35.0
+            if norm_a in cls.DOMAIN_NATURAL_KEYS:
+                return True, f"Matching natural domain key ('{col_a}' <-> '{col_b}')", 32.0
+            return True, f"Matching column name ('{col_a}' <-> '{col_b}')", 25.0
 
         # Concept match: 'cust_id' ↔ 'customer_id', 'emp_no' ↔ 'employee_id'
         if concept_a and concept_a == concept_b:
@@ -523,8 +561,8 @@ class RelationshipDetector:
                 "target_null_pct": null_pct_b,
                 "source_null_count": null_count_a,
                 "target_null_count": null_count_b,
-                "source_unique": False,
-                "target_unique": False,
+                "source_unique": (source_dup_count == 0),
+                "target_unique": (target_dup_count == 0),
                 "source_unique_count": len(set_a),
                 "target_unique_count": len(set_b),
                 "source_dup_count": source_dup_count,
@@ -540,55 +578,79 @@ class RelationshipDetector:
                 "safe_for_join": False,
                 "source_pk_fk_hint": "No Match",
                 "target_pk_fk_hint": "No Match",
+                "estimated_inner_join_rows": 0,
+                "estimated_left_join_rows": n_a,
+                "join_expansion_factor": 0.0,
+                "matching_dups_source": 0,
+                "matching_dups_target": 0,
             }
 
-        # Deterministic uniqueness calculation on matching keys
-        if source_dup_count == 0:
-            a_is_unique = True
-        else:
-            match_rows_a = norm_a[norm_a.isin(matching_keys)]
-            a_is_unique = not bool(match_rows_a.duplicated().any())
+        # Deterministic key frequencies and join simulation on matching keys
+        vc_a = norm_a.value_counts()
+        vc_b = norm_b.value_counts()
 
-        if target_dup_count == 0:
-            b_is_unique = True
-        else:
-            match_rows_b = norm_b[norm_b.isin(matching_keys)]
-            b_is_unique = not bool(match_rows_b.duplicated().any())
+        matched_rows_a = int(sum(vc_a[k] for k in matching_keys))
+        matched_rows_b = int(sum(vc_b[k] for k in matching_keys))
 
-        source_unique = a_is_unique
-        target_unique = b_is_unique
+        matching_dups_a = int(sum(vc_a[k] - 1 for k in matching_keys if vc_a[k] > 1))
+        matching_dups_b = int(sum(vc_b[k] - 1 for k in matching_keys if vc_b[k] > 1))
+
+        est_inner_rows = int(sum(vc_a[k] * vc_b[k] for k in matching_keys))
+        unmatched_rows_a = int(n_a - matched_rows_a)
+        est_left_rows = int(est_inner_rows + unmatched_rows_a)
+        expansion_factor = round((est_inner_rows / max(1, n_a)), 2)
+
+        a_is_unique = (matching_dups_a == 0)
+        b_is_unique = (matching_dups_b == 0)
+
+        # Overall column uniqueness
+        source_unique = (source_dup_count == 0)
+        target_unique = (target_dup_count == 0)
 
         if a_is_unique and b_is_unique:
             cardinality = "One-to-One"
             symbol = "1:1"
             direction = f"{clean_ds_a}.{col_a} <-> {clean_ds_b}.{col_b}"
             explanation = "Each record in Dataset A corresponds to at most one record in Dataset B and vice versa. Non-null keys are unique on both sides."
-            src_pk_hint = "Potential Primary/Unique Key"
-            tgt_pk_hint = "Potential Primary/Unique Key"
+            src_pk_hint = "Candidate Unique Key"
+            tgt_pk_hint = "Candidate Unique Key"
             safe_for_join = True
         elif a_is_unique and not b_is_unique:
             cardinality = "One-to-Many"
             symbol = "1:N"
             direction = f"{clean_ds_a}.{col_a} -> {clean_ds_b}.{col_b}"
-            explanation = "One record in Dataset A can match multiple records in Dataset B (Primary Key to Foreign Key relationship)."
-            src_pk_hint = "Potential Primary/Unique Key"
-            tgt_pk_hint = "Potential Foreign Key (Repeated Keys)"
+            explanation = (
+                f"One record in Dataset A can match multiple records in Dataset B (1:N structure). "
+                f"Keys are unique in {clean_ds_a} and repeat {matching_dups_b} time(s) across matching records in {clean_ds_b}. "
+                f"Estimated {est_inner_rows} rows in INNER JOIN."
+            )
+            src_pk_hint = "Candidate Unique Key (1-side)"
+            tgt_pk_hint = "Repeated Key (N-side)"
             safe_for_join = True
         elif not a_is_unique and b_is_unique:
             cardinality = "Many-to-One"
             symbol = "N:1"
             direction = f"{clean_ds_a}.{col_a} -> {clean_ds_b}.{col_b}"
-            explanation = "Multiple records in Dataset A match a single unique record in Dataset B (Foreign Key to Primary Key relationship)."
-            src_pk_hint = "Potential Foreign Key (Repeated Keys)"
-            tgt_pk_hint = "Potential Primary/Unique Key"
+            explanation = (
+                f"Multiple records in Dataset A match a single unique record in Dataset B (N:1 structure). "
+                f"Keys repeat {matching_dups_a} time(s) in {clean_ds_a} referencing unique keys in {clean_ds_b}. "
+                f"Estimated {est_inner_rows} rows in INNER JOIN."
+            )
+            src_pk_hint = "Repeated Key (N-side)"
+            tgt_pk_hint = "Candidate Unique Key (1-side)"
             safe_for_join = True
         else:
             cardinality = "Many-to-Many"
             symbol = "M:N"
             direction = f"{clean_ds_a}.{col_a} <-> {clean_ds_b}.{col_b}"
-            explanation = "The join key repeats in both datasets. Joining on this column will cause row multiplication (Cartesian product on repeated keys)."
-            src_pk_hint = "Non-Unique Key (Repeated Records)"
-            tgt_pk_hint = "Non-Unique Key (Repeated Records)"
+            explanation = (
+                f"The join key repeats in both datasets ({matching_dups_a} duplicate(s) in {clean_ds_a}, "
+                f"{matching_dups_b} duplicate(s) in {clean_ds_b}). "
+                f"Joining on this column will cause row multiplication (Cartesian product on repeated keys, "
+                f"estimated {est_inner_rows} rows in INNER JOIN, {expansion_factor}x factor)."
+            )
+            src_pk_hint = "Repeated Join Key"
+            tgt_pk_hint = "Repeated Join Key"
             safe_for_join = False
 
         return {
@@ -596,8 +658,10 @@ class RelationshipDetector:
             "target_null_pct": null_pct_b,
             "source_null_count": null_count_a,
             "target_null_count": null_count_b,
-            "source_unique": source_unique,
-            "target_unique": target_unique,
+            "source_unique": a_is_unique,
+            "target_unique": b_is_unique,
+            "source_col_unique": source_unique,
+            "target_col_unique": target_unique,
             "source_unique_count": len(set_a),
             "target_unique_count": len(set_b),
             "source_dup_count": source_dup_count,
@@ -613,6 +677,11 @@ class RelationshipDetector:
             "safe_for_join": safe_for_join,
             "source_pk_fk_hint": src_pk_hint,
             "target_pk_fk_hint": tgt_pk_hint,
+            "estimated_inner_join_rows": est_inner_rows,
+            "estimated_left_join_rows": est_left_rows,
+            "join_expansion_factor": expansion_factor,
+            "matching_dups_source": matching_dups_a,
+            "matching_dups_target": matching_dups_b,
         }
 
     @classmethod
@@ -670,14 +739,30 @@ class RelationshipDetector:
 
         # Duplicate key & Cardinality assessment
         if cardinality == "Many-to-Many":
+            est_inner = metrics.get("estimated_inner_join_rows", 0)
+            exp_factor = metrics.get("join_expansion_factor", 1.0)
+            matching_dups_a = metrics.get("matching_dups_source", 0)
+            matching_dups_b = metrics.get("matching_dups_target", 0)
+
             warnings.append(
-                "Many-to-Many warning: Duplicate key values exist in both datasets. "
-                "Joining on this key may multiply rows and create a cartesian expansion."
+                f"Many-to-Many warning: Duplicate key values exist in both datasets ({matching_dups_a} in source, {matching_dups_b} in target). "
+                f"Joining on this key will multiply rows (estimated {est_inner} rows in INNER JOIN, {exp_factor}x factor)."
             )
-            join_risk = "High Risk — Unsafe Many-to-Many (Row Multiplication Risk)"
-            confidence = "LOW"
-            conf_label = "Candidate Relationship (Unsafe Join)"
-            conf_reasons.append("Non-unique keys on both sides (Row explosion risk)")
+            if exp_factor > 1.5:
+                join_risk = "High Risk — Unsafe Many-to-Many (Row Multiplication Risk)"
+                confidence = "LOW"
+                conf_label = "Candidate Relationship (Unsafe Join)"
+                conf_reasons.append(f"Non-unique keys on both sides ({exp_factor}x row multiplication risk)")
+            else:
+                join_risk = "Moderate Risk — Minor Key Duplication (M:N)"
+                if calc_score >= 70.0 and max_null <= 20.0:
+                    confidence = "MEDIUM"
+                    conf_label = "Possible Relationship (Minor Duplication)"
+                    conf_reasons.append(f"High key overlap ({overlap}%) with minor duplicate keys ({est_inner} rows estimated)")
+                else:
+                    confidence = "LOW"
+                    conf_label = "Candidate Relationship"
+                    conf_reasons.append("Non-unique keys on both sides")
         elif cardinality == "One-to-One":
             join_risk = "Low Risk — Safe 1:1 Linkage"
             if calc_score >= 70.0 and max_null <= 20.0:
@@ -740,14 +825,22 @@ class RelationshipDetector:
                         score += 30.0
                     col_s = r.source_column.lower()
                     col_t = r.target_column.lower()
-                    if "_id" in col_s or "_id" in col_t:
+                    if "_id" in col_s or "_id" in col_t or col_s in cls.GENERIC_ID_NAMES:
+                        score += 50.0
+                    elif col_s in cls.DOMAIN_NATURAL_KEYS:
                         score += 20.0
                     if col_s == col_t:
                         score += 15.0
                     return score
 
                 best_rel = max(rels, key=_score_key)
-                best_rel.is_recommended = True
+                for r in rels:
+                    if r is best_rel:
+                        r.is_recommended = True
+                        r.is_candidate = False
+                    else:
+                        r.is_recommended = False
+                        r.is_candidate = True
 
     # =========================================================================
     # SAFE EXECUTION & ROW EXPLOSION SAFEGUARD

@@ -114,7 +114,10 @@ class ProfilerAgent:
 
             # Compute type-specific distributions
             if semantic_type == "NUMERIC":
-                numeric_stats = cls._compute_numeric_stats(parsed_series if parsed_series is not None else series)
+                numeric_stats = cls._compute_numeric_stats(
+                    parsed_series if parsed_series is not None else series,
+                    raw_series=series,
+                )
             elif semantic_type == "DATETIME":
                 datetime_stats = cls._compute_datetime_stats(parsed_series if parsed_series is not None else series)
             else:
@@ -193,8 +196,11 @@ class ProfilerAgent:
         unique_vals = set(non_null.unique())
         if len(unique_vals) <= 2:
             str_vals = {str(v).strip().lower() for v in unique_vals}
-            if str_vals.issubset({"true", "false", "1", "0", "yes", "no", "t", "f"}):
+            if str_vals.issubset({"true", "false", "yes", "no", "t", "f"}):
                 return "BOOLEAN", None
+            if str_vals.issubset({"0", "1", "0.0", "1.0"}):
+                if len(unique_vals) == 2 or not pd.api.types.is_numeric_dtype(series):
+                    return "BOOLEAN", None
 
         # 2. Check Native Datetime
         if pd.api.types.is_datetime64_any_dtype(series):
@@ -204,18 +210,40 @@ class ProfilerAgent:
         if pd.api.types.is_numeric_dtype(series):
             return "NUMERIC", series
 
-        # 4. Check String Date representation (e.g. DD-MM-YYYY, YYYY-MM-DD)
+        # 4. Check String Date representation (e.g. DD-MM-YYYY, YYYY-MM-DD, MM/DD/YYYY)
         sample = non_null.astype(str).str.strip().head(50)
         has_date_delimiters = sample.str.contains(r"[\/\-\.]", regex=True).mean() > 0.7
         if has_date_delimiters:
             try:
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=UserWarning)
-                    # Attempt conversion with flexible dayfirst=True
-                    converted_dates = pd.to_datetime(sample, dayfirst=True, errors="coerce")
-                    valid_ratio = converted_dates.notna().mean()
-                    if valid_ratio >= 0.75:
-                        full_converted = pd.to_datetime(series, dayfirst=True, errors="coerce")
+                    converted_dates = None
+                    try:
+                        c = pd.to_datetime(sample, format="mixed", errors="coerce")
+                        if c.notna().mean() >= 0.75:
+                            converted_dates = c
+                    except Exception:
+                        pass
+                    if converted_dates is None:
+                        try:
+                            c = pd.to_datetime(sample, errors="coerce")
+                            if c.notna().mean() >= 0.75:
+                                converted_dates = c
+                        except Exception:
+                            pass
+                    if converted_dates is None:
+                        try:
+                            c = pd.to_datetime(sample, dayfirst=True, errors="coerce")
+                            if c.notna().mean() >= 0.75:
+                                converted_dates = c
+                        except Exception:
+                            pass
+
+                    if converted_dates is not None and converted_dates.notna().mean() >= 0.75:
+                        try:
+                            full_converted = pd.to_datetime(series, format="mixed", errors="coerce")
+                        except Exception:
+                            full_converted = pd.to_datetime(series, errors="coerce")
                         return "DATETIME", full_converted
             except Exception:
                 pass
@@ -240,7 +268,11 @@ class ProfilerAgent:
         return "CATEGORICAL", None
 
     @classmethod
-    def _compute_numeric_stats(cls, series: pd.Series) -> Dict[str, float]:
+    def _compute_numeric_stats(
+        cls,
+        series: pd.Series,
+        raw_series: Optional[pd.Series] = None,
+    ) -> Dict[str, Any]:
         """Compute statistical summary for numeric series."""
         clean = pd.to_numeric(series, errors="coerce").dropna()
         if clean.empty:
@@ -254,11 +286,23 @@ class ProfilerAgent:
                 "q1": 0.0,
                 "q3": 0.0,
                 "iqr": 0.0,
+                "valid_count": 0,
+                "invalid_count": 0,
+                "invalid_examples": [],
             }
 
         q1 = round(float(clean.quantile(0.25)), 2)
         q3 = round(float(clean.quantile(0.75)), 2)
         iqr = round(float(q3 - q1), 2)
+
+        # Detect invalid non-null values if raw_series provided or if series had strings
+        source = raw_series if raw_series is not None else series
+        non_null_source = source.dropna()
+        valid_numeric = pd.to_numeric(non_null_source, errors="coerce")
+        invalid_mask = valid_numeric.isna()
+        invalid_vals = non_null_source[invalid_mask].astype(str).tolist()
+        invalid_count = len(invalid_vals)
+        invalid_examples = list(dict.fromkeys(invalid_vals))[:5]
 
         return {
             "count": int(clean.count()),
@@ -270,6 +314,9 @@ class ProfilerAgent:
             "q1": q1,
             "q3": q3,
             "iqr": iqr,
+            "valid_count": int(clean.count()),
+            "invalid_count": invalid_count,
+            "invalid_examples": invalid_examples,
         }
 
     @classmethod
@@ -314,7 +361,13 @@ class ProfilerAgent:
         """Compute date range and unique timestamps."""
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
-            clean = pd.to_datetime(series, dayfirst=True, errors="coerce").dropna()
+            try:
+                clean = pd.to_datetime(series, format="mixed", errors="coerce").dropna()
+            except Exception:
+                try:
+                    clean = pd.to_datetime(series, dayfirst=True, errors="coerce").dropna()
+                except Exception:
+                    clean = pd.to_datetime(series, errors="coerce").dropna()
         if clean.empty:
             return {
                 "min_date": "N/A",

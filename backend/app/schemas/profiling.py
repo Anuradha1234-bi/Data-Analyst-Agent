@@ -1,4 +1,4 @@
-﻿"""Pydantic schemas for Data Profiling and Data Quality."""
+"""Pydantic schemas for Data Profiling and Data Quality."""
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
@@ -30,6 +30,9 @@ class NumericStats(BaseModel):
     q1: float
     q3: float
     iqr: float
+    valid_count: Optional[int] = None
+    invalid_count: Optional[int] = 0
+    invalid_examples: List[str] = Field(default_factory=list)
 
 
 class CategoricalValueCount(BaseModel):

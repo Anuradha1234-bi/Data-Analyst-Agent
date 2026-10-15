@@ -65,11 +65,24 @@ class RelationshipItem(BaseModel):
     direction: Optional[str] = Field(default=None, description="Relationship direction e.g. Customers.customer_id → Orders.customer_id")
     unmatched_values_source: Optional[int] = Field(default=0, description="Count of unmatched keys in Dataset A")
     unmatched_values_target: Optional[int] = Field(default=0, description="Count of unmatched keys in Dataset B")
-    source_pk_fk_hint: Optional[str] = Field(default=None, description="Potential Primary/Unique Key or Foreign Key hint for Dataset A")
-    target_pk_fk_hint: Optional[str] = Field(default=None, description="Potential Primary/Unique Key or Foreign Key hint for Dataset B")
+    source_pk_fk_hint: Optional[str] = Field(default=None, description="Key role classification (e.g. Candidate Unique Key or Repeated Join Key)")
+    target_pk_fk_hint: Optional[str] = Field(default=None, description="Key role classification (e.g. Candidate Unique Key or Repeated Join Key)")
     cardinality_explanation: Optional[str] = Field(default=None, description="Detailed plain-English explanation of relationship cardinality")
     safe_for_join: Optional[bool] = Field(default=True, description="Whether this relationship is safe to join without row multiplication")
     is_candidate: Optional[bool] = Field(default=False, description="Whether this is a plausible candidate relationship")
+
+    # Compatibility and join simulation fields
+    source_dataset: Optional[str] = Field(default=None, description="Alias for source_dataset_name")
+    target_dataset: Optional[str] = Field(default=None, description="Alias for target_dataset_name")
+    source_unique: Optional[bool] = Field(default=None, description="Whether source matching keys are strictly unique")
+    target_unique: Optional[bool] = Field(default=None, description="Whether target matching keys are strictly unique")
+    overlap_score: Optional[float] = Field(default=None, description="Alias for value_overlap_pct")
+    confidence_pct: Optional[float] = Field(default=None, description="Percentage confidence score 0.0 to 100.0")
+    estimated_inner_join_rows: Optional[int] = Field(default=None, description="Calculated inner join row count")
+    estimated_left_join_rows: Optional[int] = Field(default=None, description="Calculated left join row count")
+    join_expansion_factor: Optional[float] = Field(default=None, description="Inner join rows divided by source rows")
+    unmatched_source_count: Optional[int] = Field(default=0, description="Alias for unmatched_values_source")
+    unmatched_target_count: Optional[int] = Field(default=0, description="Alias for unmatched_values_target")
 
 
 class RelationshipDetectResponse(BaseModel):

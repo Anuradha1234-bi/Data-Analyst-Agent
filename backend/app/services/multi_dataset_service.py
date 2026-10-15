@@ -215,6 +215,12 @@ class MultiDatasetAnalysisService:
         # 5. Build Combined Overview
         tot_rows = sum(s.rows for s in summary_items)
         tot_cols = sum(s.columns for s in summary_items)
+        all_distinct_cols: Set[str] = set()
+        for prof in individual_profiles.values():
+            for c in prof.columns:
+                all_distinct_cols.add(c.name)
+        distinct_col_count = len(all_distinct_cols)
+
         tot_cells = sum(s.total_cells for s in summary_items)
         tot_missing = sum(s.missing_cells for s in summary_items)
         overall_missing_pct = round((tot_missing / tot_cells * 100.0), 2) if tot_cells > 0 else 0.0
@@ -225,6 +231,7 @@ class MultiDatasetAnalysisService:
             total_datasets=total_successful,
             total_rows=tot_rows,
             total_columns=tot_cols,
+            distinct_columns=distinct_col_count,
             total_cells=tot_cells,
             total_missing_cells=tot_missing,
             overall_missing_percentage=overall_missing_pct,

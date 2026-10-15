@@ -55,6 +55,7 @@ class CombinedOverview(BaseModel):
     total_datasets: int
     total_rows: int
     total_columns: int
+    distinct_columns: Optional[int] = Field(default=None, description="Number of distinct schema column names across all datasets")
     total_cells: int
     total_missing_cells: int
     overall_missing_percentage: float
