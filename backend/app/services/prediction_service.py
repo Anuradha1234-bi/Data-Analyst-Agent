@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -33,7 +33,7 @@ from app.schemas.prediction import (
     TargetCandidateResponse,
     FeatureImportanceResponseItem,
 )
-from models.prediction import ProblemType, ModelEvaluationMetrics
+from models.prediction import ProblemType
 from prediction.feature_importance import FeatureImportanceService
 from prediction.feature_selector import FeatureSelector
 from prediction.forecasting import ForecastingEngine

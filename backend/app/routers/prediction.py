@@ -1,6 +1,6 @@
 """Prediction & Forecasting API Router."""
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from fastapi import (
     APIRouter,
     Depends,

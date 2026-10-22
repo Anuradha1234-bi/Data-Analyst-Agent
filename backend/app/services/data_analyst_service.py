@@ -4,10 +4,10 @@ Translates user questions into validated deterministic analytical routines.
 Traceable evidence, strict read-only execution, schema validation, and visualization generation.
 """
 
-import os
 import json
 import time
 import math
+import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -110,6 +110,22 @@ class DataAnalystService:
                 detail=f"Dataset #{request.dataset_id} not found or access denied.",
             )
 
+        # 1b. If multi-dataset IDs specified, strictly validate that all exist and belong to current user
+        if request.dataset_ids:
+            unique_ids = list(dict.fromkeys(request.dataset_ids))
+            owned_datasets = (
+                db.query(Dataset)
+                .filter(Dataset.id.in_(unique_ids), Dataset.user_id == current_user.id)
+                .all()
+            )
+            owned_id_set = {d.id for d in owned_datasets}
+            for sid in unique_ids:
+                if sid not in owned_id_set:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Dataset #{sid} not found or access denied.",
+                    )
+
         # 2. Determine file path based on requested version (Original vs Cleaned)
         use_version = (request.version or "original").lower().strip()
         active_filepath: Path
@@ -165,6 +181,8 @@ class DataAnalystService:
             pass
 
         meta_dict = {
+            "dataset_id": dataset.id,
+            "filename": ds_name,
             "column_names": [str(c) for c in df.columns],
             "data_types": {str(c): str(df[c].dtype) for c in df.columns},
             "rows": int(len(df)),
@@ -181,23 +199,60 @@ class DataAnalystService:
         datasets_dict = {ds_name: df}
         meta_dict_all = {ds_name: meta_dict}
 
-        # Add other user datasets (read-only for cross-dataset referencing if needed)
-        for od in other_datasets[:3]:
-            od_path = Path(od.file_path)
-            if od_path.exists():
-                od_load = FileLoader.load_file(str(od_path), od.filename, od.file_size_bytes or 0)
-                if od_load.success and od_load.df is not None:
-                    o_name = od.original_filename or od.filename or f"dataset_{od.id}"
-                    datasets_dict[o_name] = od_load.df
-                    meta_dict_all[o_name] = {
-                        "column_names": [str(c) for c in od_load.df.columns],
-                        "data_types": {str(c): str(od_load.df[c].dtype) for c in od_load.df.columns},
-                    }
+        # Load secondary datasets if multi-dataset IDs specified or cross-dataset query requested
+        q_lower = request.question.lower()
+        cross_ds_phrases = [
+            "cross-dataset", "across datasets", "compare datasets", "compare both datasets",
+            "join with", "joined with", "inner join", "left join", "compare row counts",
+            "not present in", "absent in", "difference between", "records across",
+        ]
+        is_cross_ds = any(k in q_lower for k in cross_ds_phrases)
+
+        target_ids = set()
+        if request.dataset_ids:
+            target_ids.update(request.dataset_ids)
+        if request.secondary_dataset_id:
+            target_ids.add(request.secondary_dataset_id)
+
+        for od in other_datasets:
+            o_name = od.original_filename or od.filename or f"dataset_{od.id}"
+            o_base = Path(o_name).stem.lower()
+            name_mentioned = (
+                o_name.lower() in q_lower
+                or (len(o_base) >= 3 and o_base in q_lower)
+                or od.filename.lower() in q_lower
+            )
+            id_matched = od.id in target_ids
+
+            # When dataset_ids is explicitly provided, only load datasets within that selection
+            if request.dataset_ids:
+                should_load = id_matched
+            else:
+                should_load = id_matched or name_mentioned or (is_cross_ds and len(datasets_dict) < 3)
+
+            if should_load:
+                od_path = Path(od.file_path)
+                if od_path.exists() and od_path.is_file():
+                    od_df, od_err = cls._get_cached_or_load_df(od_path, od.filename)
+                    if od_df is not None and not od_df.empty:
+                        datasets_dict[o_name] = od_df
+                        meta_dict_all[o_name] = {
+                            "dataset_id": od.id,
+                            "filename": o_name,
+                            "column_names": [str(c) for c in od_df.columns],
+                            "data_types": {str(c): str(od_df[c].dtype) for c in od_df.columns},
+                            "rows": int(len(od_df)),
+                            "columns": int(len(od_df.columns)),
+                        }
+                else:
+                    warnings.append(f"Secondary dataset '{o_name}' file is missing from physical storage.")
 
         # 6. Resolve conversation session context
         session_ctx = request.context
         if not session_ctx:
             session_ctx = ConversationContextManager.get_context(current_user.id, dataset.id, actual_version_used)
+        if isinstance(session_ctx, dict):
+            session_ctx["selected_dataset"] = ds_name
 
         # Execute through Query Orchestrator
         try:
@@ -206,6 +261,7 @@ class DataAnalystService:
                 datasets=datasets_dict,
                 metadata=meta_dict_all,
                 context=session_ctx,
+                default_dataset=ds_name,
             )
         except Exception as e:
             errors.append(f"Query execution error: {str(e)}")
@@ -225,7 +281,14 @@ class DataAnalystService:
 
         if res_payload:
             raw_data = res_payload.get("data")
-            if isinstance(raw_data, pd.DataFrame) and not raw_data.empty:
+            if isinstance(raw_data, pd.DataFrame) and raw_data.empty:
+                result_item = AnalysisResultItem(
+                    columns=[],
+                    rows=[],
+                    total_rows=0,
+                    result_type="empty",
+                )
+            elif isinstance(raw_data, pd.DataFrame) and not raw_data.empty:
                 cols = [str(c) for c in raw_data.columns]
                 # Limit to 100 rows for response payload
                 head_df = raw_data.head(100)
@@ -313,6 +376,14 @@ class DataAnalystService:
         else:
             evidence_clean = {"raw": str(evidence_dict)}
 
+        evidence_clean["evaluated_records"] = len(df)
+        evidence_clean["total_dataset_rows"] = len(df)
+        evidence_clean["dataset_id"] = dataset.id
+        evidence_clean["filename"] = ds_name
+        evidence_clean["datasets_available"] = list(datasets_dict.keys())
+        if len(datasets_dict) > 1:
+            evidence_clean["datasets_analyzed"] = list(datasets_dict.keys())
+
         if evidence and isinstance(evidence, list):
             evidence_clean["key_findings"] = evidence
 
@@ -383,12 +454,14 @@ class DataAnalystService:
                 "Compare their monthly trends over time",
                 "What is the average modal price?",
             ]
-        elif intent_code in ("AVERAGE", "SUM", "COUNT"):
+        elif intent_code in ("AVERAGE", "SUM"):
             follow_ups = [
                 "Which category has the highest average?",
                 "Show the trend over time",
                 "Which numerical columns have the strongest correlation?",
             ]
+        elif intent_code in ("COUNT", "DATA_TYPES", "SCHEMA"):
+            follow_ups = []
         elif intent_code in ("TREND", "DATE_RANGE"):
             follow_ups = [
                 "Run a linear regression on this trend",
@@ -413,6 +486,46 @@ class DataAnalystService:
                 "Which columns have missing values?",
                 "Which product or category has the highest revenue?",
             ]
+
+        # Suppress automated insights and follow-up suggestions if explicitly excluded or table-only requested
+        q_req_lower = request.question.lower()
+        is_table_only = any(
+            p in q_req_lower for p in [
+                "return only a table", "return only the table", "return only the resulting table",
+                "only the resulting table", "only the table", "table only", "only a table", "only table",
+                "resulting table only", "return the resulting table only",
+                "return only a two-row table", "only a two-row table", "return a 2-row table",
+                "return a two-row table", "return only a 2-row table", "only a 2-row table",
+                "return only a two-column table", "only a two-column table", "return a 2-column table",
+                "return only a 2-column table", "two-column table", "2-column table",
+                "two-row table", "2-row table"
+            ]
+        ) or bool(
+            re.search(
+                r"\b(?:return\s+)?only\s+(?:a\s+|the\s+)?(?:resulting\s+)?(?:\w+[- ]\w+\s+)?table\b|"
+                r"\b(?:resulting\s+)?table\s+only\b|"
+                r"\b(?:return\s+)?(?:only\s+)?(?:a\s+|the\s+)?(?:two|2)[ -](?:row|column)\s+table\b",
+                q_req_lower,
+            )
+        )
+
+        has_negative_suppression = is_table_only or any(
+            p in q_req_lower for p in [
+                "do not include", "don't include", "without suggestion", "exclude suggestion",
+                "no suggestion", "no suggestions", "without suggestions", "exclude suggestions",
+                "do not add automated insights", "without outlier", "exclude outlier",
+                "without correlation", "exclude correlation", "without insights", "exclude insights"
+            ]
+        )
+        if has_negative_suppression:
+            automated_insights = []
+            follow_ups = []
+
+        if is_table_only:
+            evidence_clean["output_format"] = "table_only"
+            key_points = []
+            if result_item and result_item.rows and not final_answer.startswith("|"):
+                final_answer = ""
 
         exec_duration = round((time.time() - start_time) * 1000.0, 2)
 
@@ -454,15 +567,18 @@ class DataAnalystService:
         op_name = plan_obj.get("intent") or orch_resp.get("intent", {}).get("intent", "Analysis")
         op_display = op_name.replace("_", " ").title() if op_name else "Analysis"
         interp_q = orch_resp.get("question") or request.question
-        if used_cols:
-            interp_q = f"{op_display} of {', '.join(used_cols)} in {ds_name}"
+
+        resolved_source = orch_resp.get("evidence", {}).get("dataset_used") or orch_resp.get("evidence", {}).get("dataset_source")
+        display_ds_name = resolved_source if resolved_source and resolved_source in datasets_dict else ds_name
+        if used_cols and op_name not in ("DATA_TYPES", "SCHEMA", "DATASET_METADATA", "DATA_QUALITY_AUDIT", "MULTI_PART"):
+            interp_q = f"{op_display} of {', '.join(used_cols)} in {display_ds_name}"
 
         return AnalysisAskResponse(
             status=op_status,
             question=request.question,
             interpreted_question=interp_q,
             dataset_id=dataset.id,
-            dataset_name=ds_name,
+            dataset_name=display_ds_name,
             dataset_version=actual_version_used,
             operation_performed=op_display,
             columns_used=used_cols,

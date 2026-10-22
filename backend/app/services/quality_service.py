@@ -34,18 +34,55 @@ class DataQualityService:
     """Calculates granular quality metrics, hygiene warnings, and structural scores."""
 
     @classmethod
-    def analyze_dataset_quality(cls, dataset: Dataset) -> DataQualityResponse:
-        file_path = Path(dataset.file_path)
-        if not file_path.exists() or not file_path.is_file():
+    def assess_dataset(
+        cls,
+        dataset: Dataset,
+        version: str = "original",
+    ) -> DataQualityResponse:
+        """Alias for analyze_dataset_quality."""
+        return cls.analyze_dataset_quality(dataset, version=version)
+
+    @classmethod
+    def analyze_dataset_quality(
+        cls,
+        dataset: Dataset,
+        version: str = "original",
+    ) -> DataQualityResponse:
+        v_lower = (version or "original").strip().lower()
+        use_cleaned = False
+        if v_lower == "cleaned":
+            if dataset.has_cleaned and dataset.cleaned_file_path and Path(dataset.cleaned_file_path).is_file():
+                use_cleaned = True
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No cleaned version is available for this dataset.",
+                )
+        elif v_lower == "auto":
+            if dataset.has_cleaned and dataset.cleaned_file_path and Path(dataset.cleaned_file_path).is_file():
+                use_cleaned = True
+
+        if use_cleaned:
+            target_path = Path(dataset.cleaned_file_path)
+            target_filename = f"cleaned_{dataset.filename}"
+            target_size = target_path.stat().st_size if target_path.exists() else dataset.file_size_bytes
+            eval_version = "cleaned"
+        else:
+            target_path = Path(dataset.file_path)
+            target_filename = dataset.filename
+            target_size = dataset.file_size_bytes
+            eval_version = "original"
+
+        if not target_path.exists() or not target_path.is_file():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Dataset file '{dataset.filename}' not found on storage disk.",
+                detail=f"Dataset file '{target_filename}' not found on storage disk.",
             )
 
         load_result = FileLoader.load_file(
-            file_obj=str(file_path),
-            filename=dataset.filename,
-            file_size_bytes=dataset.file_size_bytes,
+            file_obj=str(target_path),
+            filename=target_filename,
+            file_size_bytes=target_size,
         )
 
         if not load_result.success or load_result.df is None:
@@ -396,7 +433,7 @@ class DataQualityService:
 
         return DataQualityResponse(
             dataset_id=dataset.id,
-            filename=dataset.filename,
+            filename=target_filename,
             summary=summary,
             columns=column_qualities,
             missing_report=missing_report,
@@ -406,4 +443,6 @@ class DataQualityService:
             constant_report=constant_report,
             consistency_report=consistency_report,
             analyzed_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            evaluated_version=eval_version,
+            has_cleaned=bool(dataset.has_cleaned and dataset.cleaned_file_path),
         )

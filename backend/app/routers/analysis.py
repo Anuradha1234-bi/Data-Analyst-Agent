@@ -1,7 +1,7 @@
 """Analysis Router - Natural Language Querying, Multi-Dataset Analysis, and History."""
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Optional
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.models.user import User

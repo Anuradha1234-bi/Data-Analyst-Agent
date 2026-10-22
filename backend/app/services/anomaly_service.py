@@ -4,7 +4,7 @@ import json
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from fastapi import HTTPException, status

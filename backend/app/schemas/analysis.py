@@ -4,6 +4,27 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from app.schemas.profiling import DatasetProfileResponse
 from app.schemas.relationship import RelationshipItem
+from app.schemas.quality import DataQualityResponse
+from app.schemas.cleaning import CleaningOverviewResponse
+from app.schemas.analytics import AnalyticsOverviewResponse, AnalyticsInsightsResponse
+from app.schemas.anomaly import AnomalyDetectResponse
+
+
+class DatasetPipelineExecutionResult(BaseModel):
+    """Execution results for all single-dataset processing phases applied to a dataset."""
+    dataset_id: int
+    name: str
+    status: str = Field(default="completed", description="'completed', 'partial', or 'failed'")
+    phases_completed: List[str] = Field(default_factory=list)
+    profile: Optional[DatasetProfileResponse] = None
+    quality: Optional[DataQualityResponse] = None
+    cleaning: Optional[CleaningOverviewResponse] = None
+    analytics: Optional[AnalyticsOverviewResponse] = None
+    anomalies: Optional[AnomalyDetectResponse] = None
+    insights: Optional[AnalyticsInsightsResponse] = None
+    phase_notes: Dict[str, str] = Field(default_factory=dict)
+
+
 
 
 class MultiDatasetAnalysisRequest(BaseModel):
@@ -137,6 +158,30 @@ class MultiDatasetAnalysisResponse(BaseModel):
         default_factory=dict,
         description="Profiles indexed by dataset ID."
     )
+    individual_quality: Dict[int, DataQualityResponse] = Field(
+        default_factory=dict,
+        description="Data quality assessments indexed by dataset ID."
+    )
+    individual_cleaning: Dict[int, CleaningOverviewResponse] = Field(
+        default_factory=dict,
+        description="Cleaning diagnostics and previews indexed by dataset ID."
+    )
+    individual_analytics: Dict[int, AnalyticsOverviewResponse] = Field(
+        default_factory=dict,
+        description="Descriptive analytics and KPIs indexed by dataset ID."
+    )
+    individual_anomalies: Dict[int, AnomalyDetectResponse] = Field(
+        default_factory=dict,
+        description="Outlier and anomaly detections indexed by dataset ID."
+    )
+    individual_insights: Dict[int, AnalyticsInsightsResponse] = Field(
+        default_factory=dict,
+        description="Automated evidence-grounded insights indexed by dataset ID."
+    )
+    dataset_pipeline_results: Dict[int, DatasetPipelineExecutionResult] = Field(
+        default_factory=dict,
+        description="Comprehensive multi-phase pipeline execution results per dataset."
+    )
     combined_overview: Optional[CombinedOverview] = None
     comparison: Optional[DatasetComparisonResponse] = None
     relationships: List[RelationshipItem] = Field(
@@ -147,3 +192,4 @@ class MultiDatasetAnalysisResponse(BaseModel):
         default_factory=list,
         description="Actionable, verified cross-dataset insights."
     )
+

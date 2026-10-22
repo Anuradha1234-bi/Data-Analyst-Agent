@@ -41,6 +41,18 @@ def recommend_query_visualization(
     data = query_result.get("data")
     row_count = query_result.get("row_count", 0)
 
+    from query.column_resolver import is_metadata_column, filter_metadata_columns
+    plan_col = query_plan.get("column")
+    if plan_col and is_metadata_column(plan_col) and plan_col.lower() not in question.lower():
+        return {
+            "recommended": False,
+            "chart_type": None,
+            "x": None,
+            "y": None,
+            "figure": None,
+            "reason": "Extraction metadata columns are not charted as domain metrics.",
+        }
+
     # 1. Non-visual conditions
     if (
         data is None
@@ -63,8 +75,13 @@ def recommend_query_visualization(
     # 1b. User Explicitly Preferred Chart Type Override
     preferred_type = query_plan.get("preferred_chart_type")
     if preferred_type in ("bar", "line", "scatter") and len(cols) >= 1:
-        cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c])]
-        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c])]
+        cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c]) and not is_metadata_column(c)]
+        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c]) and not is_metadata_column(c)]
+        if not cat_cols:
+            cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c])]
+        if not num_cols:
+            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c])]
+
         x_c = cat_cols[0] if cat_cols else cols[0]
         y_c = num_cols[0] if num_cols else (cols[1] if len(cols) > 1 else cols[0])
 
@@ -118,12 +135,24 @@ def recommend_query_visualization(
 
     # 3. TOP_N / BOTTOM_N / GROUP_BY -> Bar Chart
     if intent in (QueryIntent.TOP_N.value, QueryIntent.BOTTOM_N.value, QueryIntent.GROUP_BY.value, QueryIntent.COMPARE_GROUPS.value):
-        # Identify categorical x and numeric y
-        cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c])]
-        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c])]
+        # Identify categorical x and numeric y, preferring planned column & group_by
+        cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c]) and not is_metadata_column(c)]
+        num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c]) and not is_metadata_column(c)]
+        if not cat_cols:
+            cat_cols = [c for c in cols if not pd.api.types.is_numeric_dtype(data[c])]
+        if not num_cols:
+            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(data[c])]
 
-        x_col = cat_cols[0] if cat_cols else cols[0]
-        y_col = num_cols[0] if num_cols else (cols[1] if len(cols) > 1 else cols[0])
+        plan_grp = query_plan.get("group_by", [])
+        if plan_grp and plan_grp[0] in data.columns:
+            x_col = plan_grp[0]
+        else:
+            x_col = cat_cols[0] if cat_cols else cols[0]
+
+        if plan_col and plan_col in data.columns and (not is_metadata_column(plan_col) or plan_col in num_cols):
+            y_col = plan_col
+        else:
+            y_col = num_cols[0] if num_cols else (cols[1] if len(cols) > 1 else cols[0])
 
         fig = px.bar(
             data,

@@ -20,13 +20,17 @@ export const datasetService = {
   /**
    * Retrieve statistical distribution profiling and data hygiene report for a dataset.
    */
-  async getDatasetQuality(id) {
+  async getDatasetQuality(id, version = 'auto') {
     try {
-      const response = await api.get(`/datasets/${id}/quality`);
+      const response = await api.get(`/datasets/${id}/quality`, {
+        params: { version },
+      });
       return response.data;
     } catch (err) {
       if (err.response && err.response.status === 404) {
-        const fallback = await api.get(`/quality/${id}`);
+        const fallback = await api.get(`/quality/${id}`, {
+          params: { version },
+        });
         return fallback.data;
       }
       throw err;

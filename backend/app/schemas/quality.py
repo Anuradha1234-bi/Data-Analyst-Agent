@@ -114,3 +114,5 @@ class DataQualityResponse(BaseModel):
     constant_report: ConstantColumnsReport
     consistency_report: ConsistencyReport
     analyzed_at: str
+    evaluated_version: Optional[str] = "original"
+    has_cleaned: bool = False

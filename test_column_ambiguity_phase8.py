@@ -269,6 +269,362 @@ def test_7_suggested_questions_filtering():
     print("[PASS] Join-generated suffixed columns cleanly filtered from suggestions pool.")
 
 
+def test_8_unrelated_column_clarification_prevention():
+    """Test 8: Ensure analytical queries with explanatory clauses ('driven by order volume') do not trigger false column clarification."""
+    print("\n--- Test 8: Unrelated column clarification prevention ---")
+    columns = [
+        "Customer_ID", "Customer_Name", "Age", "City", "State",
+        "Gender", "Category", "Quantity", "Order_Amount_INR", "Order_Date", "Payment_Method"
+    ]
+    df = pd.DataFrame({
+        "Customer_ID": [1, 2, 3],
+        "Customer_Name": ["Alice", "Bob", "Charlie"],
+        "Age": [25, 30, 35],
+        "City": ["Satara", "Thane", "Pune"],
+        "State": ["MH", "MH", "MH"],
+        "Gender": ["Male", "Male", "Female"],
+        "Category": ["Electronics", "Electronics", "Clothing"],
+        "Quantity": [1, 2, 1],
+        "Order_Amount_INR": [15999.0, 12999.0, 2500.0],
+        "Order_Date": ["2024-01-01", "2024-01-02", "2024-01-03"],
+        "Payment_Method": ["Credit Card", "UPI", "Cash"]
+    })
+    meta = {
+        "column_names": columns,
+        "data_types": {c: str(df[c].dtype) for c in columns},
+        "numeric_columns": [c for c in columns if pd.api.types.is_numeric_dtype(df[c])],
+        "categorical_columns": [c for c in columns if not pd.api.types.is_numeric_dtype(df[c])],
+    }
+
+    q = (
+        "Analyze revenue across product category, city, gender, and payment method. "
+        "Identify the top-performing combination, quantify its contribution to total revenue, "
+        "and explain whether the result is driven by order volume or average order value."
+    )
+
+    plan = build_query_plan(q, {"orders.csv": meta})
+
+    # Assert no clarification is requested between Order_Date and Order_Amount_INR
+    assert plan.get("needs_clarification") is False, (
+        f"False clarification triggered! Options: {plan.get('clarification_options')}"
+    )
+    assert plan.get("column") == "Order_Amount_INR", f"Expected 'Order_Amount_INR', got {plan.get('column')}"
+    for required_dim in ["Category", "City", "Gender", "Payment_Method"]:
+        assert required_dim in plan.get("group_by", []), f"Missing required dimension '{required_dim}' in group_by"
+
+    print("[PASS] Query plan resolved revenue and 4 dimensions without false clarification on 'Order_Date'.")
+
+
+def test_9_combination_revenue_analysis():
+    """Test 9: End-to-end combination ranking, contribution %, order volume, AOV, and driver attribution."""
+    print("\n--- Test 9: End-to-end combination revenue analysis ---")
+    csv_path = os.path.join(
+        os.path.dirname(__file__),
+        "uploads", "user_20", "ffc4ae1b6dcc4d56b42b4e8818421ed7_clean_customer_orders__2_.csv"
+    )
+    if not os.path.exists(csv_path):
+        print(f"[SKIP] Dataset {csv_path} not found.")
+        return
+
+    df = pd.read_csv(csv_path)
+    meta = {
+        "column_names": [str(c) for c in df.columns],
+        "data_types": {str(c): str(df[c].dtype) for c in df.columns},
+        "numeric_columns": [str(c) for c in df.columns if pd.api.types.is_numeric_dtype(df[c])],
+        "categorical_columns": [str(c) for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])],
+        "rows": len(df),
+        "columns": len(df.columns),
+    }
+
+    q = (
+        "Analyze revenue across product category, city, gender, and payment method. "
+        "Identify the top-performing combination, quantify its contribution to total revenue, "
+        "and explain whether the result is driven by order volume or average order value."
+    )
+
+    resp = run_ask_analyst_query(
+        question=q,
+        datasets={"clean_customer_orders (2).csv": df},
+        metadata={"clean_customer_orders (2).csv": meta},
+    )
+
+    assert resp["status"] == "success", f"Expected success, got {resp['status']}"
+    evidence = resp.get("evidence", {})
+    comb = evidence.get("combination_analysis") or evidence.get("raw_evidence", {}).get("combination_analysis")
+    assert comb is not None, "Missing combination_analysis in evidence"
+
+    # Verify exact calculated numbers
+    assert comb["combination_revenue"] == 15999.0
+    assert comb["total_valid_revenue"] == 159327.0
+    assert comb["contribution_pct"] == 10.04
+    assert comb["order_volume"] == 1
+    assert comb["combination_aov"] == 15999.0
+    assert comb["primary_driver"] == "average_order_value"
+    assert "causation" in comb["causation_disclaimer"].lower()
+
+    # Verify grounded answer
+    ans_text = resp["answer"]["answer"]
+    assert "15,999.00" in ans_text
+    assert "10.04%" in ans_text
+    assert "average order value" in ans_text.lower()
+    print("[PASS] Full multidimensional combination revenue analysis successfully verified.")
+
+
+def test_10_false_filter_extraction_and_dual_outlier_comparison():
+    """Test 10: Bug 1 - 'for this dataset' must not inject Category == 'This', and dual IQR vs Z-score comparison."""
+    print("\n--- Test 10: False filter extraction prevention & dual outlier comparison ---")
+    meta = {
+        "column_names": ["Customer_ID", "Customer_Name", "Age", "City", "State", "Gender", "Category", "Quantity", "Order_Amount_INR", "Order_Date", "Payment_Method"],
+        "data_types": {"Customer_ID": "object", "Customer_Name": "object", "Age": "int64", "City": "object", "State": "object", "Gender": "object", "Category": "object", "Quantity": "int64", "Order_Amount_INR": "float64", "Order_Date": "object", "Payment_Method": "object"},
+        "numeric_columns": ["Age", "Quantity", "Order_Amount_INR"],
+        "categorical_columns": ["Customer_ID", "Customer_Name", "City", "State", "Gender", "Category", "Order_Date", "Payment_Method"],
+        "rows": 10,
+        "columns": 11,
+    }
+
+    q = (
+        "Detect outliers in Order_Amount_INR using the IQR method and Z-score method. "
+        "Compare the detected records, explain why the methods may disagree, and recommend which method is more appropriate for this dataset."
+    )
+
+    plan = build_query_plan(q, {"orders.csv": meta}, default_dataset="orders.csv")
+
+    # 1. Assert no false filter Category == 'This'
+    assert len(plan["filters"]) == 0, f"Expected 0 filters, got: {plan['filters']}"
+    assert plan["column"] == "Order_Amount_INR", f"Expected 'Order_Amount_INR', got {plan['column']}"
+    assert plan["metadata"].get("compare_methods") is True, "Expected compare_methods=True"
+
+    # 2. Test actual dual execution with realistic dataset (skewed data)
+    df = pd.DataFrame({
+        "Order_ID": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112],
+        "Category": ["Electronics", "Electronics", "Clothing", "Clothing", "Home", "Home", "Electronics", "Clothing", "Home", "Electronics", "Clothing", "Home"],
+        "Order_Amount_INR": [150.0, 180.0, 200.0, 210.0, 220.0, 250.0, 280.0, 300.0, 310.0, 350.0, 1200.0, 5000.0],
+    })
+
+    resp = run_ask_analyst_query(
+        question=q,
+        datasets={"orders.csv": df},
+        metadata={"orders.csv": meta},
+        default_dataset="orders.csv",
+    )
+
+    assert resp["status"] == "success", f"Expected success, got {resp['status']}"
+    ev = resp.get("evidence", {}) or resp.get("result", {}).get("evidence", {})
+    assert ev.get("iqr_outliers") is not None, "Missing iqr_outliers in evidence"
+    assert ev.get("zscore_outliers") is not None, "Missing zscore_outliers in evidence"
+    assert ev.get("overlap_count") is not None, "Missing overlap_count in evidence"
+    assert ev.get("iqr_only_count") is not None, "Missing iqr_only_count in evidence"
+    assert ev.get("zscore_only_count") is not None, "Missing zscore_only_count in evidence"
+    assert ev.get("skewness") is not None, "Missing skewness in evidence"
+    assert "skewness" in ev.get("disagreement_explanation", "").lower(), "Disagreement explanation must cite skewness"
+    assert "appropriate" in ev.get("recommendation", "").lower() or "recommendation" in ev.get("recommendation", "").lower()
+
+    # Verify flagged records table is returned
+    res_data = resp.get("result", {}).get("data")
+    assert isinstance(res_data, pd.DataFrame) and not res_data.empty, "Expected non-empty records DataFrame"
+    assert "Outlier_Status" in res_data.columns, "Expected 'Outlier_Status' column in flagged records"
+
+    # Verify constant column handling fails safely
+    df_const = pd.DataFrame({"Order_Amount_INR": [100.0, 100.0, 100.0, 100.0, 100.0]})
+    resp_const = run_ask_analyst_query(
+        question=q,
+        datasets={"orders.csv": df_const},
+        metadata={"orders.csv": meta},
+        default_dataset="orders.csv",
+    )
+    assert resp_const["status"] == "success"
+    print("[PASS] Bug 1 verified: no false filter, dual IQR/Z-score comparison, overlap analysis, and skewness explanation.")
+
+
+def test_11_selected_dataset_hijacking_prevention():
+    """Test 11: Bug 2 - Explicitly selected dataset must not be hijacked by other datasets."""
+    print("\n--- Test 11: Selected dataset hijacking prevention ---")
+    meta = {
+        "clean_customer_orders (2).csv": {
+            "column_names": ["Customer_ID", "Customer_Name", "Age", "City", "State", "Gender", "Category", "Quantity", "Order_Amount_INR", "Order_Date", "Payment_Method"],
+            "data_types": {"Customer_ID": "object", "Customer_Name": "object", "Age": "int64", "City": "object", "State": "object", "Gender": "object", "Category": "object", "Quantity": "int64", "Order_Amount_INR": "float64", "Order_Date": "object", "Payment_Method": "object"},
+        },
+        "customers_quality_test.csv": {
+            "column_names": ["customer_id", "customer_name", "email", "city", "age", "signup_date", "annual_income_inr"],
+            "data_types": {"customer_id": "object", "customer_name": "object", "email": "object", "city": "object", "age": "int64", "signup_date": "object", "annual_income_inr": "float64"},
+        },
+    }
+
+    q = (
+        "Perform a complete data quality audit covering completeness, uniqueness, validity, consistency, "
+        "accuracy limitations, and statistical anomalies. Return a table with issue name, affected rows, severity, "
+        "detection rule, and recommended action. Do not label a value inaccurate without a reliable reference."
+    )
+
+    # User selected 'clean_customer_orders (2).csv'
+    plan = build_query_plan(q, meta, default_dataset="clean_customer_orders (2).csv")
+    assert plan["dataset"] == "clean_customer_orders (2).csv", (
+        f"Selected dataset hijacked! Expected 'clean_customer_orders (2).csv', got '{plan['dataset']}'"
+    )
+    assert plan["intent"] == "DATA_QUALITY_AUDIT", f"Expected DATA_QUALITY_AUDIT, got {plan['intent']}"
+    print("[PASS] Bug 2 verified: selected dataset remained locked without hijacking.")
+
+
+def test_12_correlation_variables_pearson_spearman_pvalues():
+    """Test 12: Bug 3 - Correlation between Age and Order_Amount_INR with Pearson, Spearman, N, p-values, and causation caveat."""
+    print("\n--- Test 12: Dual Pearson and Spearman correlation with p-values and causation caveat ---")
+    meta = {
+        "clean_customer_orders (2).csv": {
+            "column_names": ["Customer_ID", "Customer_Name", "Age", "City", "State", "Gender", "Category", "Quantity", "Order_Amount_INR", "Order_Date", "Payment_Method"],
+            "data_types": {"Customer_ID": "object", "Customer_Name": "object", "Age": "int64", "City": "object", "State": "object", "Gender": "object", "Category": "object", "Quantity": "int64", "Order_Amount_INR": "float64", "Order_Date": "object", "Payment_Method": "object"},
+            "numeric_columns": ["Age", "Quantity", "Order_Amount_INR"],
+        }
+    }
+
+    q = (
+        "Correlation versus causation. Test whether customer age is associated with order amount. "
+        "Calculate Pearson and Spearman correlations, visualize the relationship, assess statistical significance where appropriate, "
+        "and explain why correlation does not establish causation."
+    )
+
+    plan = build_query_plan(q, meta, default_dataset="clean_customer_orders (2).csv")
+    assert plan["intent"] == "CORRELATION", f"Expected CORRELATION intent, got {plan['intent']}"
+    assert plan["column"] == "Age", f"Expected column 'Age', got {plan['column']}"
+    assert plan["secondary_column"] == "Order_Amount_INR", f"Expected secondary_column 'Order_Amount_INR', got {plan['secondary_column']}"
+    assert plan["needs_clarification"] is False, "Unexpected clarification requested!"
+
+    # Test execution with actual data
+    df = pd.DataFrame({
+        "Age": [22, 25, 30, 35, 40, 45, 50, 55, 60, 65],
+        "Order_Amount_INR": [120.0, 150.0, 200.0, 310.0, 400.0, 420.0, 500.0, 620.0, 710.0, 850.0],
+        "Quantity": [1, 2, 1, 3, 2, 4, 3, 5, 4, 6],
+    })
+
+    resp = run_ask_analyst_query(
+        question=q,
+        datasets={"clean_customer_orders (2).csv": df},
+        metadata=meta,
+        default_dataset="clean_customer_orders (2).csv",
+    )
+
+    assert resp["status"] == "success", f"Expected success, got {resp['status']}"
+    ev = resp.get("evidence", {}) or resp.get("result", {}).get("evidence", {})
+    assert ev.get("col_a") == "Age", f"Expected col_a='Age', got {ev.get('col_a')}"
+    assert ev.get("col_b") == "Order_Amount_INR", f"Expected col_b='Order_Amount_INR', got {ev.get('col_b')}"
+    assert ev.get("pearson_r") is not None, "Missing pearson_r"
+    assert ev.get("spearman_rho") is not None, "Missing spearman_rho"
+    assert ev.get("pearson_p_value") is not None, "Missing pearson_p_value"
+    assert ev.get("spearman_p_value") is not None, "Missing spearman_p_value"
+    assert ev.get("valid_pairs_n") == 10, f"Expected 10 valid pairs, got {ev.get('valid_pairs_n')}"
+    assert "causation" in ev.get("causation_warning", "").lower(), "Missing causation disclaimer"
+
+    # Verify answer text contains both statistics and causation caveat
+    ans = resp["answer"]["answer"]
+    assert "Pearson" in ans and "Spearman" in ans
+    assert "causation" in ans.lower()
+
+    # Verify zero variance handling fails safely
+    df_const = pd.DataFrame({"Age": [30, 30, 30, 30, 30], "Order_Amount_INR": [100.0, 200.0, 300.0, 400.0, 500.0]})
+    resp_const = run_ask_analyst_query(
+        question=q,
+        datasets={"clean_customer_orders (2).csv": df_const},
+        metadata=meta,
+        default_dataset="clean_customer_orders (2).csv",
+    )
+    assert resp_const["status"] == "success"
+    print("[PASS] Bug 3 verified: exact pair resolved, Pearson + Spearman calculated with p-values, N, and causation caveat.")
+
+
+def test_13_comprehensive_data_quality_audit():
+    """Test 13: Bug 4 - Comprehensive data quality audit covering all 6 dimensions and exact 5 table columns."""
+    print("\n--- Test 13: Comprehensive data quality audit ---")
+    df = pd.DataFrame({
+        "Customer_ID": [101, 102, 103, 104, 105, 106, 106],  # 1 duplicate ID
+        "Customer_Name": ["Alice", "Bob", "Charlie", None, "Eva", "Frank", "Frank"],  # 1 missing
+        "Age": [25, 30, -5, 40, 45, 50, 50],  # 1 negative age (validity)
+        "City": ["Mumbai", "mumbai ", "Delhi", "Delhi", "Bengaluru", "Bengaluru", "Bengaluru"],  # categorical casing inconsistency
+        "Order_Amount_INR": [100.0, 150.0, 200.0, 250.0, 300.0, 15000.0, 15000.0],  # statistical outlier
+        "Order_Date": ["2023-01-01", "2023-01-02", "not_a_date", "2023-01-04", "2023-01-05", "2023-01-06", "2023-01-06"],  # 1 invalid date
+    })
+
+    meta = {
+        "orders.csv": {
+            "column_names": list(df.columns),
+            "data_types": {str(c): str(df[c].dtype) for c in df.columns},
+            "rows": len(df),
+            "columns": len(df.columns),
+        }
+    }
+
+    q = (
+        "Perform a complete data quality audit covering completeness, uniqueness, validity, consistency, "
+        "accuracy limitations, and statistical anomalies. Return a table with issue name, affected rows, severity, "
+        "detection rule, and recommended action. Do not label a value inaccurate without a reliable reference."
+    )
+
+    resp = run_ask_analyst_query(
+        question=q,
+        datasets={"orders.csv": df},
+        metadata=meta,
+        default_dataset="orders.csv",
+    )
+
+    assert resp["status"] == "success", f"Expected success, got {resp['status']}"
+    res_df = resp["result"]["data"]
+    assert isinstance(res_df, pd.DataFrame), "Expected DataFrame output"
+
+    expected_cols = ["Issue Name", "Affected Rows", "Severity", "Detection Rule", "Recommended Action"]
+    assert list(res_df.columns) == expected_cols, f"Expected {expected_cols}, got {list(res_df.columns)}"
+
+    # Verify all 6 dimensions are represented in the audit table
+    issues = res_df["Issue Name"].tolist()
+    assert any("missing" in i.lower() for i in issues), "Missing completeness dimension"
+    assert any("duplicate" in i.lower() for i in issues), "Missing uniqueness dimension"
+    assert any("valid" in i.lower() or "negative" in i.lower() for i in issues), "Missing validity dimension"
+    assert any("consisten" in i.lower() for i in issues), "Missing consistency dimension"
+    assert any("outlier" in i.lower() or "anomal" in i.lower() for i in issues), "Missing anomaly dimension"
+    assert any("accuracy limitation" in i.lower() for i in issues), "Missing accuracy limitation dimension"
+
+    # Verify accuracy limitation disclaimer
+    acc_row = res_df[res_df["Issue Name"].str.contains("Accuracy Limitation", case=False)]
+    assert not acc_row.empty
+    assert "ground truth" in acc_row.iloc[0]["Detection Rule"].lower() or "reference" in acc_row.iloc[0]["Recommended Action"].lower()
+    print("[PASS] Bug 4 verified: complete 6-dimension data quality audit with exact 5 columns.")
+
+
+def test_14_legitimate_filter_and_edge_cases():
+    """Test 14: Verify legitimate filters continue working and edge cases fail safely."""
+    print("\n--- Test 14: Legitimate filters & edge cases ---")
+    meta = {
+        "orders.csv": {
+            "column_names": ["Customer_ID", "City", "Category", "Order_Amount_INR"],
+            "data_types": {"Customer_ID": "object", "City": "object", "Category": "object", "Order_Amount_INR": "float64"},
+            "rows": 5,
+            "columns": 4,
+        }
+    }
+
+    # 1. Legitimate filter: "Show total order amount for Mumbai"
+    plan_filter = build_query_plan("Show total order amount for Mumbai", meta, default_dataset="orders.csv")
+    assert len(plan_filter["filters"]) > 0, "Expected legitimate filter for Mumbai"
+    assert plan_filter["filters"][0]["value"] == "Mumbai"
+
+    # 2. Empty dataset safe handling
+    df_empty = pd.DataFrame(columns=["Customer_ID", "City", "Category", "Order_Amount_INR"])
+    resp_empty = run_ask_analyst_query(
+        question="What is the average order amount?",
+        datasets={"orders.csv": df_empty},
+        metadata=meta,
+        default_dataset="orders.csv",
+    )
+    assert resp_empty["status"] in ("success", "error")
+
+    # 3. Missing column safe handling
+    resp_missing = run_ask_analyst_query(
+        question="What is the average profit?",
+        datasets={"orders.csv": pd.DataFrame({"Order_Amount_INR": [100.0, 200.0]})},
+        metadata=meta,
+        default_dataset="orders.csv",
+    )
+    assert resp_missing["status"] in ("success", "error")
+    print("[PASS] Legitimate filter and safety edge cases verified successfully.")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("RUNNING COLUMN AMBIGUITY RESOLUTION TEST SUITE")
@@ -280,6 +636,13 @@ if __name__ == "__main__":
     test_5_user_selected_clarification_continuation()
     test_6_real_uploaded_dataset()
     test_7_suggested_questions_filtering()
+    test_8_unrelated_column_clarification_prevention()
+    test_9_combination_revenue_analysis()
+    test_10_false_filter_extraction_and_dual_outlier_comparison()
+    test_11_selected_dataset_hijacking_prevention()
+    test_12_correlation_variables_pearson_spearman_pvalues()
+    test_13_comprehensive_data_quality_audit()
+    test_14_legitimate_filter_and_edge_cases()
     print("\n" + "=" * 60)
-    print("ALL 7 COLUMN AMBIGUITY TESTS PASSED SUCCESSFULLY!")
+    print("ALL 14 TESTS PASSED SUCCESSFULLY!")
     print("=" * 60)

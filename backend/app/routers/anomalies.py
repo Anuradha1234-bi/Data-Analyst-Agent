@@ -1,6 +1,5 @@
 """Anomaly & Outlier Detection Router."""
 
-from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 

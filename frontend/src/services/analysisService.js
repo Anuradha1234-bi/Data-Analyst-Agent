@@ -4,12 +4,39 @@ export const analysisService = {
   /**
    * Submit a natural language analytical question against a dataset and version.
    */
-  async askQuestion(datasetId, question, version = 'original', context = null) {
-    const response = await api.post('/analysis/ask', {
+  async askQuestion(datasetId, question, version = 'original', context = null, datasetIds = null) {
+    const payload = {
       dataset_id: datasetId,
       question,
       version,
       context,
+    };
+    if (datasetIds && Array.isArray(datasetIds) && datasetIds.length > 0) {
+      payload.dataset_ids = datasetIds;
+    }
+    const response = await api.post('/analysis/ask', payload);
+    return response.data;
+  },
+
+  /**
+   * Analyze one or multiple datasets simultaneously (profiling, combined metrics, schema comparison, relationships).
+   */
+  async analyzeMultipleDatasets(datasetIds, mode = 'all', settings = {}) {
+    const response = await api.post('/analysis/multi', {
+      dataset_ids: datasetIds,
+      mode,
+      settings,
+    });
+    return response.data;
+  },
+
+  /**
+   * Dedicated endpoint to compare schemas and attributes across 2+ selected datasets.
+   */
+  async compareDatasets(datasetIds) {
+    const response = await api.post('/analysis/compare', {
+      dataset_ids: datasetIds,
+      mode: 'comparison',
     });
     return response.data;
   },

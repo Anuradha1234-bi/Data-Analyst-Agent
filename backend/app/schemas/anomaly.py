@@ -1,6 +1,6 @@
 """Pydantic Schemas for Anomaly and Outlier Detection Module."""
 
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 

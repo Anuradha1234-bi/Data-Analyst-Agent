@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BarChart3, TrendingUp, Activity, Grid, BoxSelect } from 'lucide-react';
+import { BarChart3, TrendingUp, Activity, Grid } from 'lucide-react';
 
 export const AnalyticalChart = ({ chartData }) => {
   const [hoveredPoint, setHoveredPoint] = useState(null);
@@ -22,11 +22,11 @@ export const AnalyticalChart = ({ chartData }) => {
   // Correlation Heatmap View
   if (effectiveType === 'heatmap' && matrix && categories && categories.length > 0) {
     return (
-      <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-3">
-        <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-3">
+      <div className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#1E293B] rounded-2xl p-5 shadow-xs space-y-3">
+        <div className="flex items-center justify-between border-b border-[#F1F5F9] dark:border-[#1E293B] pb-3">
           <div className="flex items-center gap-2">
             <Grid className="w-4 h-4 text-[#2563EB]" />
-            <h4 className="text-xs font-bold text-[#0F172A]">{title || 'Correlation Matrix Heatmap'}</h4>
+            <h4 className="text-xs font-bold text-[#0F172A] dark:text-white">{title || 'Correlation Matrix Heatmap'}</h4>
           </div>
           <span className="font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-50 text-[#2563EB] border border-blue-200 text-[10px]">
             HEATMAP
@@ -36,9 +36,9 @@ export const AnalyticalChart = ({ chartData }) => {
           <table className="w-full text-xs text-center border-collapse">
             <thead>
               <tr>
-                <th className="p-2 border border-slate-200 bg-slate-50 text-left font-semibold text-slate-700">Feature</th>
+                <th className="p-2 border border-slate-200 dark:border-[#1E293B] bg-slate-50 dark:bg-[#131F3F] text-left font-semibold text-slate-700 dark:text-slate-200">Feature</th>
                 {categories.map((c, i) => (
-                  <th key={i} className="p-2 border border-slate-200 bg-slate-50 font-semibold text-slate-700 truncate max-w-[100px]" title={c}>
+                  <th key={i} className="p-2 border border-slate-200 dark:border-[#1E293B] bg-slate-50 dark:bg-[#131F3F] font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[100px]" title={c}>
                     {c}
                   </th>
                 ))}
@@ -47,7 +47,7 @@ export const AnalyticalChart = ({ chartData }) => {
             <tbody>
               {categories.map((rowCat, rIdx) => (
                 <tr key={rIdx}>
-                  <td className="p-2 border border-slate-200 bg-slate-50 text-left font-semibold text-slate-700 truncate max-w-[120px]" title={rowCat}>
+                  <td className="p-2 border border-slate-200 dark:border-[#1E293B] bg-slate-50 dark:bg-[#131F3F] text-left font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[120px]" title={rowCat}>
                     {rowCat}
                   </td>
                   {matrix[rIdx]?.map((val, cIdx) => {
@@ -128,9 +128,9 @@ export const AnalyticalChart = ({ chartData }) => {
   };
 
   return (
-    <div className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-xs space-y-3">
+    <div className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#1E293B] rounded-2xl p-5 shadow-xs space-y-3">
       {/* Chart Header with Interactive Type Toggles */}
-      <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-3">
+      <div className="flex items-center justify-between border-b border-[#F1F5F9] dark:border-[#1E293B] pb-3">
         <div className="flex items-center gap-2">
           {effectiveType === 'line' ? (
             <TrendingUp className="w-4 h-4 text-[#2563EB]" />
@@ -139,7 +139,7 @@ export const AnalyticalChart = ({ chartData }) => {
           ) : (
             <BarChart3 className="w-4 h-4 text-[#2563EB]" />
           )}
-          <h4 className="text-xs font-bold text-[#0F172A]">{title || 'Analytical Visualization'}</h4>
+          <h4 className="text-xs font-bold text-[#0F172A] dark:text-white">{title || 'Analytical Visualization'}</h4>
         </div>
 
         {/* View mode toggle chips */}
@@ -147,7 +147,9 @@ export const AnalyticalChart = ({ chartData }) => {
           <button
             onClick={() => setActiveTypeOverride('bar')}
             className={`px-2 py-0.5 rounded font-medium transition-colors ${
-              effectiveType === 'bar' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              effectiveType === 'bar'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 dark:bg-[#131F3F] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1E293B]'
             }`}
           >
             Bar
@@ -155,7 +157,9 @@ export const AnalyticalChart = ({ chartData }) => {
           <button
             onClick={() => setActiveTypeOverride('line')}
             className={`px-2 py-0.5 rounded font-medium transition-colors ${
-              effectiveType === 'line' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              effectiveType === 'line'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 dark:bg-[#131F3F] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1E293B]'
             }`}
           >
             Line
@@ -163,7 +167,9 @@ export const AnalyticalChart = ({ chartData }) => {
           <button
             onClick={() => setActiveTypeOverride('scatter')}
             className={`px-2 py-0.5 rounded font-medium transition-colors ${
-              effectiveType === 'scatter' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              effectiveType === 'scatter'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 dark:bg-[#131F3F] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1E293B]'
             }`}
           >
             Scatter

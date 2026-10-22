@@ -1,6 +1,5 @@
 """Authentication Router - Register, Login, Me, Logout endpoints."""
 
-import os
 import re
 import secrets
 import hashlib

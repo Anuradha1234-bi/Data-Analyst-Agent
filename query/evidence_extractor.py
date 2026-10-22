@@ -66,9 +66,14 @@ def extract_query_evidence(
     # If first row has numeric metrics
     if relevant_rows and not computed_values:
         first_r = relevant_rows[0]
+        from query.column_resolver import is_metadata_column
         for k, v in first_r.items():
-            if isinstance(v, (int, float)):
+            if isinstance(v, (int, float)) and not is_metadata_column(k):
                 computed_values[k] = v
+        if not computed_values:
+            for k, v in first_r.items():
+                if isinstance(v, (int, float)):
+                    computed_values[k] = v
 
     # 3. Aggregations & Comparisons
     aggregation_values = {
@@ -123,7 +128,16 @@ def extract_query_evidence(
     }
 
     # Pass through advanced statistical and insight containers
-    for k in ("regression_details", "test_details", "chi_details", "correlation_analysis", "automated_insights"):
+    for k in (
+        "regression_details", "test_details", "chi_details", "correlation_analysis",
+        "automated_insights", "combination_analysis", "iqr_outliers", "zscore_outliers",
+        "overlap_count", "iqr_only_count", "zscore_only_count", "skewness",
+        "disagreement_explanation", "recommendation", "data_quality_audit",
+        "peer_n", "pearson_r", "spearman_rho", "pearson_p_value", "spearman_p_value",
+        "summary_table", "col_a", "col_b", "valid_pairs_n", "causation_warning",
+        "missing_pairs", "significance_threshold_alpha", "pearson_significant", "spearman_significant",
+        "evaluated_records", "total_rows", "total_dataset_rows", "total_columns", "numeric_columns", "dataset_id",
+    ):
         if k in raw_evidence:
             evidence[k] = raw_evidence[k]
 

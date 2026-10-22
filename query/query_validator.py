@@ -98,6 +98,16 @@ def validate_query_plan(
     sec_ds_name = query_plan.get("secondary_dataset")
     if sec_ds_name and sec_ds_name in datasets:
         df_cols = list(df.columns) + [c for c in datasets[sec_ds_name].columns if c not in df.columns]
+
+    # Include derived column in df_cols if source columns are present
+    derived_info = query_plan.get("derived_column") or query_plan.get("metadata", {}).get("derived_column")
+    if derived_info and isinstance(derived_info, dict):
+        c1 = derived_info.get("col1")
+        c2 = derived_info.get("col2")
+        out_name = derived_info.get("output_name")
+        if c1 in df_cols and c2 in df_cols and out_name and out_name not in df_cols:
+            df_cols.append(out_name)
+
     df_cols_lower = [c.lower() for c in df_cols]
 
     # 4. Check Column Existence and Datatypes
@@ -106,7 +116,7 @@ def validate_query_plan(
         missing_formatted = ", ".join(f"'{c}'" for c in missing_cols)
         available_formatted = ", ".join(f"'{c}'" for c in df_cols)
         errors.append(
-            f"Requested column(s) {missing_formatted} do not exist in dataset '{target_ds_name}'. Available columns: {available_formatted}."
+            f"This information is not available in the uploaded CSV. Requested column(s) {missing_formatted} do not exist in dataset '{target_ds_name}' and cannot be calculated from available data. Available columns: {available_formatted}."
         )
 
     col = query_plan.get("column")
@@ -121,19 +131,27 @@ def validate_query_plan(
                 if agg_clean not in ALLOWED_AGGREGATIONS:
                     errors.append(f"Unsupported aggregation '{agg}'. Allowed: {list(ALLOWED_AGGREGATIONS)}")
                 elif agg_clean in NUMERIC_ONLY_AGGREGATIONS:
-                    if not pd.api.types.is_numeric_dtype(df[col]):
+                    if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
                         errors.append(f"Aggregation '{agg}' requires a numeric column, but '{col}' has datatype '{df[col].dtype}'.")
-    elif intent in (
+    elif not missing_cols and intent in (
         QueryIntent.AVERAGE.value,
         QueryIntent.SUM.value,
         QueryIntent.MEDIAN.value,
         QueryIntent.MINIMUM.value,
         QueryIntent.MAXIMUM.value,
+        QueryIntent.DESCRIPTIVE_STATISTICS.value,
     ):
         available_formatted = ", ".join(f"'{c}'" for c in df_cols)
         errors.append(
             f"No valid numeric column specified or found for {intent.lower()} aggregation in dataset '{target_ds_name}'. Available columns: {available_formatted}."
         )
+    elif not missing_cols and intent in (QueryIntent.TOP_N.value, QueryIntent.BOTTOM_N.value, QueryIntent.SORT.value):
+        group_by_check = query_plan.get("group_by", [])
+        if not group_by_check:
+            available_formatted = ", ".join(f"'{c}'" for c in df_cols)
+            errors.append(
+                f"No valid metric column specified or found for {intent.lower()} ranking in dataset '{target_ds_name}'. Available columns: {available_formatted}."
+            )
 
     sec_col = query_plan.get("secondary_column")
     if sec_col is not None and sec_col not in df_cols:
@@ -196,9 +214,26 @@ def validate_query_plan(
 
         if sec_ds and sec_ds in datasets:
             # Check relationships
-            if cfg.get("require_validated_relationship", True):
+            if intent == QueryIntent.COMPARE_DATASETS.value:
+                # Dataset schema and row-count comparisons do not require a relational join key
+                pass
+            elif cfg.get("require_validated_relationship", True):
                 if not relationships:
-                    errors.append(f"No validated relationships found between '{target_ds_name}' and '{sec_ds}'. Cross-dataset joins require verified key relationships.")
+                    try:
+                        from core.relationship_detector import RelationshipDetector
+                        rd = RelationshipDetector()
+                        det_res = rd.detect_relationships({target_ds_name: df, sec_ds: datasets[sec_ds]})
+                        relationships = det_res.relationships
+                    except Exception:
+                        relationships = []
+
+                if not relationships:
+                    # Check if any common key column exists between the two datasets
+                    c_target = set(df.columns)
+                    c_sec = set(datasets[sec_ds].columns)
+                    common = [c for c in c_target if c in c_sec]
+                    if not common:
+                        errors.append(f"No validated relationships found between '{target_ds_name}' and '{sec_ds}'. Cross-dataset joins require verified key relationships.")
                 else:
                     # Look for relationship connecting target_ds_name and sec_ds
                     matching_rels = [
@@ -207,7 +242,11 @@ def validate_query_plan(
                         or (getattr(r, "source_dataset", None) == sec_ds and getattr(r, "target_dataset", None) == target_ds_name)
                     ]
                     if not matching_rels:
-                        errors.append(f"No verified relationship exists connecting '{target_ds_name}' and '{sec_ds}'. Join rejected for data safety.")
+                        c_target = set(df.columns)
+                        c_sec = set(datasets[sec_ds].columns)
+                        common = [c for c in c_target if c in c_sec]
+                        if not common:
+                            errors.append(f"No verified relationship exists connecting '{target_ds_name}' and '{sec_ds}'. Join rejected for data safety.")
                     else:
                         rel = matching_rels[0]
                         # Check Many-to-Many safeguards

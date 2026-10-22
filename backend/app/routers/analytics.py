@@ -5,7 +5,6 @@ time-series trend comparisons with causal caveats, correlation matrices,
 IQR outlier detection, automated insights, and data exports.
 """
 
-from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 

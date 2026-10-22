@@ -52,6 +52,7 @@ OUTPUT JSON SCHEMA:
         question: str,
         metadata: Dict[str, Any],
         context: Optional[Dict[str, Any]] = None,
+        default_dataset: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], str]:
         """Produce a validated analytical query plan.
 
@@ -66,7 +67,7 @@ OUTPUT JSON SCHEMA:
                 return llm_plan, "Gemini (AI Structured Planner)"
 
         # Deterministic rule-based semantic fallback
-        fallback_plan = build_query_plan(question, metadata, context=context)
+        fallback_plan = build_query_plan(question, metadata, context=context, default_dataset=default_dataset)
         return fallback_plan, "Deterministic Semantic Engine (Grounded Allowlist)"
 
     @classmethod

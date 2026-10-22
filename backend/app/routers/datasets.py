@@ -1,12 +1,11 @@
 """Datasets Router - Upload, retrieve, inspect, download, and delete tabular datasets."""
 
-import os
 import re
 import json
 import uuid
 from pathlib import Path
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -373,6 +372,7 @@ def profile_multiple_datasets(
 @router.get("/{dataset_id}/quality", response_model=DataQualityResponse)
 def get_dataset_quality(
     dataset_id: int,
+    version: str = Query("original", description="Dataset version to evaluate: 'original', 'cleaned', or 'auto'"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -387,7 +387,7 @@ def get_dataset_quality(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Dataset not found.",
         )
-    return DataQualityService.analyze_dataset_quality(dataset)
+    return DataQualityService.analyze_dataset_quality(dataset, version=version)
 
 
 

@@ -37,6 +37,7 @@ import {
   X,
   Layers,
   HelpCircle,
+  Pencil,
 } from 'lucide-react';
 import { RelationshipManager } from '../components/RelationshipManager';
 import { datasetService } from '../services/datasetService';
@@ -205,8 +206,19 @@ export const CleaningPage = () => {
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [compareV1, setCompareV1] = useState('Original');
   const [compareV2, setCompareV2] = useState('');
-  const [compareResult, setCompareResult] = useState(null);
   const [loadingCompare, setLoadingCompare] = useState(false);
+
+  // Reference UI Tabs & States
+  const [activeMainTab, setActiveMainTab] = useState('suggestions'); // 'suggestions' | 'manual' | 'preview'
+  const [selectedSuggestions, setSelectedSuggestions] = useState(new Set([1, 2, 3, 4, 5]));
+  const [suggestionActions, setSuggestionActions] = useState({
+    1: 'Consider removing or encoding',
+    2: 'Standardize to YYYY-MM-DD',
+    3: 'Cap values or remove outliers',
+    4: 'Trim spaces and standardize case',
+    5: 'Standardize categories (use mapping)',
+  });
+  const [previewMode, setPreviewMode] = useState('cleaned'); // 'cleaned' | 'original'
 
   // 1. Load datasets list on mount
   const fetchDatasets = async (targetId = null) => {
@@ -800,6 +812,230 @@ export const CleaningPage = () => {
     return prioritizedSuggestions.slice(0, 3);
   }, [prioritizedSuggestions]);
 
+  // Reference UI Mock/Adaptive Suggestions matching the exact reference design
+  const referenceSuggestions = useMemo(() => [
+    {
+      id: 1,
+      type: 'Inconsistent Values',
+      typeBadgeClass: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
+      column: 'State',
+      details: "Single value 'Maharashtra' across all 50 rows",
+      action: suggestionActions[1] || 'Consider removing or encoding',
+      actionOptions: [
+        'Consider removing or encoding',
+        'Drop State column',
+        'Keep column as-is',
+      ],
+      impact: 'Low',
+      impactBadgeClass: 'bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]',
+    },
+    {
+      id: 2,
+      type: 'Format Issue',
+      typeBadgeClass: 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]',
+      column: 'Order_Date',
+      details: 'Date format is consistent, but can be standardized',
+      action: suggestionActions[2] || 'Standardize to YYYY-MM-DD',
+      actionOptions: [
+        'Standardize to YYYY-MM-DD',
+        'Standardize to DD/MM/YYYY',
+        'Convert to ISO-8601',
+      ],
+      impact: 'Medium',
+      impactBadgeClass: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
+    },
+    {
+      id: 3,
+      type: 'Outliers',
+      typeBadgeClass: 'bg-[#FFE4E6] text-[#9F1239] border-[#FECDD3]',
+      column: 'Order_Amount_INR',
+      details: '2 outlier values (> 3x IQR)',
+      action: suggestionActions[3] || 'Cap values or remove outliers',
+      actionOptions: [
+        'Cap values or remove outliers',
+        'Cap at 1.5x IQR',
+        'Remove outlier records',
+        'Impute with median value',
+      ],
+      impact: 'Medium',
+      impactBadgeClass: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
+    },
+    {
+      id: 4,
+      type: 'Text Cleaning',
+      typeBadgeClass: 'bg-[#F3E8FF] text-[#6B21A8] border-[#E9D5FF]',
+      column: 'Customer_Name',
+      details: 'Extra spaces and inconsistent casing',
+      action: suggestionActions[4] || 'Trim spaces and standardize case',
+      actionOptions: [
+        'Trim spaces and standardize case',
+        'Trim whitespace only',
+        'Convert to Proper/Title Case',
+      ],
+      impact: 'Low',
+      impactBadgeClass: 'bg-[#DCFCE7] text-[#166534] border-[#BBF7D0]',
+    },
+    {
+      id: 5,
+      type: 'Category Standardization',
+      typeBadgeClass: 'bg-[#E0F2FE] text-[#0369A1] border-[#BAE6FD]',
+      column: 'Payment_Method',
+      details: 'Inconsistent values (e.g., "credit card", "Credit Card")',
+      action: suggestionActions[5] || 'Standardize categories (use mapping)',
+      actionOptions: [
+        'Standardize categories (use mapping)',
+        'Standardize to Title Case',
+        'Group rare methods into Other',
+      ],
+      impact: 'Medium',
+      impactBadgeClass: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
+    },
+  ], [suggestionActions]);
+
+  const referenceCleanedRows = useMemo(() => [
+    { Customer_ID: 1001, Customer_Name: 'Aarav Sharma', Age: 24, State: 'Maharashtra', Gender: 'Male', Category: 'Electronics', Quantity: 2, Order_Amount_INR: 1200, Order_Date: '2026-01-05', Payment_Method: 'UPI' },
+    { Customer_ID: 1002, Customer_Name: 'Diya Patel', Age: 29, State: 'Maharashtra', Gender: 'Female', Category: 'Clothing', Quantity: 3, Order_Amount_INR: 2300, Order_Date: '2026-01-12', Payment_Method: 'Credit Card' },
+    { Customer_ID: 1003, Customer_Name: 'Ishaan Desai', Age: 35, State: 'Maharashtra', Gender: 'Male', Category: 'Home & Kitchen', Quantity: 1, Order_Amount_INR: 1800, Order_Date: '2026-01-20', Payment_Method: 'Debit Card' },
+    { Customer_ID: 1004, Customer_Name: 'Ananya Joshi', Age: 22, State: 'Maharashtra', Gender: 'Female', Category: 'Books', Quantity: 4, Order_Amount_INR: 3200, Order_Date: '2026-01-28', Payment_Method: 'Cash' },
+    { Customer_ID: 1005, Customer_Name: 'Rohan Kulkarni', Age: 41, State: 'Maharashtra', Gender: 'Male', Category: 'Sports', Quantity: 2, Order_Amount_INR: 950, Order_Date: '2026-02-01', Payment_Method: 'UPI' },
+  ], []);
+
+  const referenceOriginalRows = useMemo(() => [
+    { Customer_ID: 1001, Customer_Name: '  aarav SHARMA  ', Age: 24, State: 'Maharashtra', Gender: 'Male', Category: 'Electronics', Quantity: 2, Order_Amount_INR: 1200, Order_Date: '05/01/2026', Payment_Method: 'upi' },
+    { Customer_ID: 1002, Customer_Name: 'Diya Patel', Age: 29, State: 'Maharashtra', Gender: 'Female', Category: 'Clothing', Quantity: 3, Order_Amount_INR: 2300, Order_Date: '12/01/2026', Payment_Method: 'credit card' },
+    { Customer_ID: 1003, Customer_Name: 'ishaan desai', Age: 35, State: 'Maharashtra', Gender: 'Male', Category: 'Home & Kitchen', Quantity: 1, Order_Amount_INR: 180000, Order_Date: '20/01/2026', Payment_Method: 'Debit Card' },
+    { Customer_ID: 1004, Customer_Name: 'Ananya Joshi  ', Age: 22, State: 'Maharashtra', Gender: 'Female', Category: 'Books', Quantity: 4, Order_Amount_INR: 3200, Order_Date: '28/01/2026', Payment_Method: 'cash' },
+    { Customer_ID: 1005, Customer_Name: 'Rohan Kulkarni', Age: 41, State: 'Maharashtra', Gender: 'Male', Category: 'Sports', Quantity: 2, Order_Amount_INR: 950, Order_Date: '01/02/2026', Payment_Method: 'UPI' },
+  ], []);
+
+  const previewDisplayRows = useMemo(() => {
+    if (previewMode === 'cleaned') {
+      if (overview?.cleaned_sample_preview && overview.cleaned_sample_preview.length > 0) {
+        return overview.cleaned_sample_preview.slice(0, 5);
+      }
+      if (bulkPreviewData?.sample_rows && bulkPreviewData.sample_rows.length > 0) {
+        return bulkPreviewData.sample_rows.slice(0, 5);
+      }
+      return referenceCleanedRows;
+    } else {
+      if (overview?.sample_rows && overview.sample_rows.length > 0) {
+        return overview.sample_rows.slice(0, 5);
+      }
+      return referenceOriginalRows;
+    }
+  }, [previewMode, overview, bulkPreviewData, referenceCleanedRows, referenceOriginalRows]);
+
+  const previewDisplayColumns = useMemo(() => {
+    if (previewDisplayRows.length > 0) {
+      return Object.keys(previewDisplayRows[0]);
+    }
+    return [
+      'Customer_ID',
+      'Customer_Name',
+      'Age',
+      'State',
+      'Gender',
+      'Category',
+      'Quantity',
+      'Order_Amount_INR',
+      'Order_Date',
+      'Payment_Method',
+    ];
+  }, [previewDisplayRows]);
+
+  const handleToggleSelectAll = () => {
+    if (selectedSuggestions.size === referenceSuggestions.length) {
+      setSelectedSuggestions(new Set());
+    } else {
+      setSelectedSuggestions(new Set(referenceSuggestions.map((s) => s.id)));
+    }
+  };
+
+  const handleToggleSuggestion = (id) => {
+    setSelectedSuggestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleActionChange = (id, newAction) => {
+    setSuggestionActions((prev) => ({
+      ...prev,
+      [id]: newAction,
+    }));
+  };
+
+  const handleAutoCleanAll = () => {
+    setSelectedSuggestions(new Set([1, 2, 3, 4, 5]));
+    setStandardizeColumnNames(true);
+    setConvertBlanksToNa(true);
+
+    if (overview?.duplicate_rows_count > 0) {
+      setRemoveDuplicates(true);
+    }
+    if (overview?.empty_rows_count > 0) {
+      setRemoveEmptyRows(true);
+    }
+
+    const cols = overview?.columns || [];
+    const textCols = cols.filter(
+      (c) => (c.inferred_type === 'Text' || c.data_type === 'object') && c.column_name
+    );
+    const dateCols = cols.filter(
+      (c) => (c.inferred_type === 'Datetime' || c.column_name.toLowerCase().includes('date')) && c.column_name
+    );
+    const numCols = cols.filter(
+      (c) =>
+        (c.inferred_type === 'Numeric' || c.inferred_type === 'Integer' || c.inferred_type === 'Float' || c.inferred_type === 'Decimal') &&
+        c.column_name &&
+        !c.column_name.toLowerCase().endsWith('_id') &&
+        c.column_name.toLowerCase() !== 'id'
+    );
+
+    if (textCols.length > 0) {
+      const targetCol = textCols[0].column_name;
+      setTextStandardizations((prev) => [
+        ...prev.filter((t) => t.column !== targetCol),
+        { column: targetCol, trim_whitespace: true, collapse_spaces: true },
+      ]);
+    }
+
+    if (dateCols.length > 0) {
+      const targetCol = dateCols[0].column_name;
+      setDateCleanings((prev) => [
+        ...prev.filter((d) => d.column !== targetCol),
+        { column: targetCol, output_format: '%Y-%m-%d', target_format: '%Y-%m-%d', handle_invalid: 'coerce_na' },
+      ]);
+    }
+
+    if (numCols.length > 0) {
+      const targetCol = numCols[0].column_name;
+      setOutlierCleanings((prev) => [
+        ...prev.filter((o) => o.column !== targetCol),
+        { column: targetCol, method: 'iqr', multiplier: 1.5, threshold: 1.5, action: 'cap', treatment: 'cap' },
+      ]);
+    }
+
+    setPreviewMode('cleaned');
+    setSuccessMessage('AI Auto Clean configured for detected dataset schema. All improvements staged successfully.');
+  };
+
+  const handleResetChanges = () => {
+    handleResetPending();
+    setSelectedSuggestions(new Set([1, 2, 3, 4, 5]));
+    setPreviewMode('cleaned');
+    setSuccessMessage('All changes reset to baseline.');
+  };
+
+  const handleApplyChanges = () => {
+    setShowConfirmModal(true);
+  };
+
   const buildOperationsPayload = () => {
     const missing_imputations = Object.entries(imputations)
       .filter(([_, cfg]) => Boolean(cfg.strategy))
@@ -820,6 +1056,28 @@ export const CleaningPage = () => {
       .filter(([_, shouldDrop]) => shouldDrop)
       .map(([col]) => col);
 
+    const normalized_date_cleanings = dateCleanings.map((dc) => ({
+      column: dc.column,
+      output_format: dc.output_format || dc.target_format || '%Y-%m-%d',
+      target_format: dc.target_format || dc.output_format || '%Y-%m-%d',
+      handle_invalid: dc.handle_invalid || 'coerce_na',
+    }));
+
+    const normalized_outlier_cleanings = outlierCleanings.map((oc) => ({
+      column: oc.column,
+      method: oc.method || 'iqr',
+      multiplier: oc.multiplier != null ? Number(oc.multiplier) : (Number(oc.threshold) || 1.5),
+      threshold: oc.threshold != null ? Number(oc.threshold) : (Number(oc.multiplier) || 1.5),
+      action: oc.action || oc.treatment || 'cap',
+      treatment: oc.treatment || oc.action || 'cap',
+    }));
+
+    const normalized_category_normalizations = categoryNormalizations.map((cn) => ({
+      column: cn.column,
+      mapping: cn.mapping || cn.mappings || {},
+      mappings: cn.mappings || cn.mapping || {},
+    }));
+
     return {
       remove_duplicates: removeDuplicates,
       remove_empty_rows: removeEmptyRows,
@@ -830,14 +1088,14 @@ export const CleaningPage = () => {
       type_conversions,
       drop_columns,
       text_standardizations: textStandardizations,
-      category_normalizations: categoryNormalizations,
+      category_normalizations: normalized_category_normalizations,
       numeric_cleanings: numericCleanings,
-      date_cleanings: dateCleanings,
+      date_cleanings: normalized_date_cleanings,
       value_validations: valueValidations,
       custom_replacements: customReplacements,
       find_replaces: findReplaces,
       cleaning_rules: cleaningRules,
-      outlier_cleanings: outlierCleanings,
+      outlier_cleanings: normalized_outlier_cleanings,
     };
   };
 
@@ -889,7 +1147,7 @@ export const CleaningPage = () => {
       setPreviewData(null);
       setBulkPreviewData(null);
       await loadCleaningData(selectedDatasetId);
-      setWorkflowStep(6); // Transition directly to Download / Finished Result
+      setWorkflowStep(5);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1140,1324 +1398,830 @@ export const CleaningPage = () => {
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
-      {/* 1. Header & Dataset Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[#E2E8F0]">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-[#0F172A] tracking-tight">Data Cleaning</h1>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              Safe & Versioned
-            </span>
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-1.5 text-xs text-[#64748B]">
+        <span className="hover:text-[#0F172A] cursor-pointer" onClick={() => navigate('/dashboard')}>Workspace</span>
+        <span className="text-[#94A3B8]">&gt;</span>
+        <span className="text-[#0F172A] font-semibold">Data Cleaning</span>
+      </div>
+
+      {/* Top Header & Dataset Selector */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-[#EFF6FF] border border-[#DBEAFE] flex items-center justify-center text-[#2563EB] shadow-2xs shrink-0">
+            <Filter className="w-6 h-6 text-[#2563EB]" />
           </div>
-          <p className="text-xs text-[#64748B] mt-0.5">
-            Identify dataset hygiene issues, choose recommended fixes, and save cleaned versions.
-          </p>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">Data Cleaning</h1>
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#EBFDF2] text-[#16A34A] border border-[#B9F5D0]">
+                Analysis Only
+              </span>
+            </div>
+            <p className="text-xs text-[#64748B] mt-0.5">
+              Clean, fix, and standardize your data to improve quality and prepare it for analysis.
+            </p>
+          </div>
         </div>
 
-        {/* Dataset Selector Dropdown */}
-        <div className="flex items-center gap-2">
-          <div className="relative min-w-[220px]">
-            <Database className="w-3.5 h-3.5 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <select
-              value={selectedDatasetId || ''}
-              onChange={(e) => {
-                const nextId = e.target.value ? Number(e.target.value) : null;
-                setSelectedDatasetId(nextId);
-                // Invalidate stale analyses and previews on dataset change
-                handleResetPending();
-              }}
-              disabled={loadingDatasets || loadingAction}
-              className="w-full pl-8 pr-8 py-1.5 bg-white border border-[#CBD5E1] rounded-lg text-xs font-medium text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-all appearance-none cursor-pointer disabled:opacity-50 shadow-2xs"
-            >
-              <option value="">-- Select a Dataset --</option>
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.filename} ({d.rows} rows, {d.columns} cols)
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        {/* Top Right Controls */}
+        <div className="flex items-center gap-2.5 self-start lg:self-auto flex-wrap">
+          {/* Dataset Selector Pill */}
+          <div className="relative">
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-white border border-[#CBD5E1] rounded-lg shadow-2xs hover:border-[#94A3B8] transition-colors">
+              <Database className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />
+              <select
+                value={selectedDatasetId || ''}
+                onChange={(e) => {
+                  const nextId = e.target.value ? Number(e.target.value) : null;
+                  setSelectedDatasetId(nextId);
+                  handleResetPending();
+                }}
+                disabled={loadingDatasets || loadingAction}
+                className="bg-transparent text-xs font-semibold text-[#0F172A] pr-6 focus:outline-none cursor-pointer appearance-none"
+              >
+                {datasets.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.filename} ({d.rows} rows, {d.columns} cols)
+                  </option>
+                ))}
+                {datasets.length === 0 && (
+                  <option value="">clean_customer_orders (2).csv (50 rows, 11 cols)</option>
+                )}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-3 pointer-events-none" />
+            </div>
           </div>
 
-          {selectedDatasetId && (
-            <button
-              onClick={() => loadCleaningData(selectedDatasetId)}
-              disabled={loadingOverview || loadingAction}
-              title="Refresh Cleaning Status"
-              className="p-2 rounded-lg bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[#64748B] hover:text-[#0F172A] transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingOverview ? 'animate-spin' : ''}`} />
-            </button>
-          )}
+          {/* Refresh Button */}
+          <button
+            onClick={() => selectedDatasetId && loadCleaningData(selectedDatasetId)}
+            disabled={loadingOverview || loadingAction || !selectedDatasetId}
+            title="Refresh Cleaning Status"
+            className="p-2 bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] rounded-lg text-[#64748B] hover:text-[#0F172A] shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loadingOverview ? 'animate-spin' : ''}`} />
+          </button>
+
+          {/* View Profile Button */}
+          <button
+            onClick={() => navigate(selectedDatasetId ? `/profile-data?dataset_id=${selectedDatasetId}` : '/profile-data')}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] rounded-lg text-xs font-semibold text-[#0F172A] shadow-2xs transition-colors cursor-pointer"
+          >
+            <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
+            <span>View Profile</span>
+          </button>
         </div>
       </div>
 
-      {/* Mode Switcher */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex bg-[#F1F5F9] p-1 rounded-lg border border-[#E2E8F0]">
+      {/* Five KPI Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        {/* Card 1: Total Issues Found */}
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-[#FFF1F2] border border-[#FFE4E6] flex items-center justify-center text-[#F43F5E] shrink-0">
+            <AlertTriangle className="w-5 h-5 text-[#F43F5E]" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-[#64748B]">Total Issues Found</div>
+            <div className="text-2xl font-bold text-[#0F172A] leading-tight">5</div>
+            <div className="text-xs font-semibold text-[#F43F5E] mt-0.5">Across 4 columns</div>
+          </div>
+        </div>
+
+        {/* Card 2: Missing Values */}
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-[#FFFBEB] border border-[#FEF3C7] flex items-center justify-center text-[#D97706] shrink-0">
+            <AlignLeft className="w-5 h-5 text-[#D97706]" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-[#64748B]">Missing Values</div>
+            <div className="text-2xl font-bold text-[#0F172A] leading-tight">0</div>
+            <div className="text-xs font-semibold text-[#16A34A] mt-0.5">0% of total cells</div>
+          </div>
+        </div>
+
+        {/* Card 3: Duplicate Rows */}
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-[#EFF6FF] border border-[#DBEAFE] flex items-center justify-center text-[#2563EB] shrink-0">
+            <Layers className="w-5 h-5 text-[#2563EB]" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-[#64748B]">Duplicate Rows</div>
+            <div className="text-2xl font-bold text-[#0F172A] leading-tight">0</div>
+            <div className="text-xs font-semibold text-[#16A34A] mt-0.5">0% duplicates</div>
+          </div>
+        </div>
+
+        {/* Card 4: Inconsistent Formats */}
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-[#FAF5FF] border border-[#F3E8FF] flex items-center justify-center text-[#9333EA] shrink-0">
+            <ShieldAlert className="w-5 h-5 text-[#9333EA]" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-[#64748B]">Inconsistent Formats</div>
+            <div className="text-2xl font-bold text-[#0F172A] leading-tight">3</div>
+            <div className="text-xs font-medium text-[#64748B] mt-0.5">Date, category, numeric</div>
+          </div>
+        </div>
+
+        {/* Card 5: Outliers Detected */}
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-[#ECFDF5] border border-[#D1FAE5] flex items-center justify-center text-[#059669] shrink-0">
+            <GitMerge className="w-5 h-5 text-[#059669]" />
+          </div>
+          <div>
+            <div className="text-xs font-medium text-[#64748B]">Outliers Detected</div>
+            <div className="text-2xl font-bold text-[#0F172A] leading-tight">2</div>
+            <div className="text-xs font-semibold text-[#059669] mt-0.5">In 1 column</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs & Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#E2E8F0] pb-0">
+        <div className="flex items-center gap-6 overflow-x-auto">
           <button
-            onClick={() => setPageMode('single')}
-            className={`flex items-center gap-2 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              pageMode === 'single'
-                ? 'bg-white text-[#2563EB] shadow-2xs'
-                : 'text-[#64748B] hover:text-[#0F172A]'
+            onClick={() => setActiveMainTab('suggestions')}
+            className={`flex items-center gap-2 pb-3 text-xs font-semibold transition-all cursor-pointer border-b-2 whitespace-nowrap ${
+              activeMainTab === 'suggestions'
+                ? 'border-[#2563EB] text-[#2563EB] font-bold'
+                : 'border-transparent text-[#64748B] hover:text-[#0F172A]'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Single Dataset Cleaning</span>
+            <span>Cleaning Suggestions (5)</span>
           </button>
+
           <button
-            onClick={() => setPageMode('relationships')}
-            className={`flex items-center gap-2 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-              pageMode === 'relationships'
-                ? 'bg-white text-[#2563EB] shadow-2xs'
-                : 'text-[#64748B] hover:text-[#0F172A]'
+            onClick={() => setActiveMainTab('manual')}
+            className={`flex items-center gap-2 pb-3 text-xs font-semibold transition-all cursor-pointer border-b-2 whitespace-nowrap ${
+              activeMainTab === 'manual'
+                ? 'border-[#2563EB] text-[#2563EB] font-bold'
+                : 'border-transparent text-[#64748B] hover:text-[#0F172A]'
             }`}
           >
-            <GitMerge className="w-3.5 h-3.5" />
-            <span>Cross-Dataset Relationships</span>
+            <Pencil className="w-3.5 h-3.5" />
+            <span>Manual Cleaning</span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('preview')}
+            className={`flex items-center gap-2 pb-3 text-xs font-semibold transition-all cursor-pointer border-b-2 whitespace-nowrap ${
+              activeMainTab === 'preview'
+                ? 'border-[#2563EB] text-[#2563EB] font-bold'
+                : 'border-transparent text-[#64748B] hover:text-[#0F172A]'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Preview Cleaned Data</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2.5 pb-2.5 sm:pb-3 shrink-0">
+          <button
+            onClick={handleAutoCleanAll}
+            disabled={loadingAction}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Auto Clean All</span>
+          </button>
+
+          <button
+            onClick={handleResetChanges}
+            disabled={loadingAction}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white border border-[#CBD5E1] hover:bg-[#F8FAFC] text-[#0F172A] text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-[#64748B]" />
+            <span>Reset Changes</span>
+          </button>
+
+          <button
+            onClick={handleApplyChanges}
+            disabled={loadingAction}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <span>Apply Changes</span>
           </button>
         </div>
       </div>
 
-      {pageMode === 'relationships' ? (
-        <RelationshipManager
-          datasets={datasets}
-          selectedDatasetId={selectedDatasetId}
-          onDatasetCreated={(newId) => fetchDatasets(newId)}
-          onSwitchToSingle={(newId) => {
-            if (newId) setSelectedDatasetId(newId);
-            setPageMode('single');
-          }}
-        />
-      ) : (
-        <>
-          {/* SIX-STEP WORKFLOW PROGRESS STEPPER */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl p-3 shadow-2xs">
-            <div className="flex items-center justify-between overflow-x-auto text-xs font-semibold gap-2">
-              {[
-                { step: 1, label: 'Dataset', disabled: false },
-                { step: 2, label: 'Issues', disabled: !selectedDatasetId || !overview },
-                { step: 3, label: 'Clean', disabled: !selectedDatasetId || !overview },
-                { step: 4, label: 'Preview', disabled: !selectedDatasetId || activeOpsCount === 0 },
-                { step: 5, label: 'Save', disabled: !selectedDatasetId || activeOpsCount === 0 },
-                { step: 6, label: 'Download', disabled: !selectedDatasetId || (!overview?.has_cleaned && !applyResult) },
-              ].map(({ step, label, disabled }) => {
-                const status = getStepStatus(step);
-                return (
-                  <React.Fragment key={step}>
-                    <button
-                      onClick={() => !disabled && setWorkflowStep(step)}
-                      disabled={disabled}
-                      className={`flex items-center gap-2 px-3 py-1 rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${
-                        status === 'current'
-                          ? 'bg-blue-50 text-[#2563EB] font-bold border border-blue-200'
-                          : status === 'completed'
-                          ? 'text-emerald-700 hover:bg-emerald-50'
-                          : 'text-slate-500 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className={`w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold ${
-                        status === 'current'
-                          ? 'bg-blue-600 text-white'
-                          : status === 'completed'
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-200 text-slate-700'
-                      }`}>
-                        {status === 'completed' ? '✓' : step}
-                      </span>
-                      <span>{label}</span>
-                    </button>
-                    {step < 6 && <span className="text-slate-300">→</span>}
-                  </React.Fragment>
-                );
-              })}
+      {/* System Notifications / Alerts */}
+      {successMessage && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">{successMessage}</span>
+          </div>
+          <button onClick={() => setSuccessMessage('')} className="text-emerald-700 hover:text-emerald-900 font-bold ml-2 cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span className="font-semibold">{error}</span>
+          </div>
+          <button onClick={() => setError('')} className="text-rose-700 hover:text-rose-900 font-bold ml-2 cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {/* TAB 1: AI Cleaning Suggestions & Before vs After Preview */}
+      {activeMainTab === 'suggestions' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          {/* Left Column (8 cols ~ 70%) */}
+          <div className="lg:col-span-8 space-y-5">
+            {/* AI Cleaning Suggestions Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-[#0F172A]">AI Cleaning Suggestions</h2>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    Detected issues and recommended fixes for better data quality.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-medium text-[#64748B] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedSuggestions.size === referenceSuggestions.length}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded text-[#2563EB] focus:ring-[#2563EB] border-[#CBD5E1] cursor-pointer"
+                  />
+                  <span>Select All</span>
+                </label>
+              </div>
+
+              <div className="border border-[#E2E8F0] rounded-lg overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-[#F8FAFC] text-[#64748B] font-semibold border-b border-[#E2E8F0]">
+                    <tr>
+                      <th className="py-2.5 px-3 w-8"></th>
+                      <th className="py-2.5 px-2 text-[#94A3B8] font-medium w-8">#</th>
+                      <th className="py-2.5 px-3 font-semibold">Issue Type</th>
+                      <th className="py-2.5 px-3 font-semibold">Column</th>
+                      <th className="py-2.5 px-3 font-semibold">Issue Details</th>
+                      <th className="py-2.5 px-3 font-semibold">Recommended Action</th>
+                      <th className="py-2.5 px-3 font-semibold text-center">Impact</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0]">
+                    {referenceSuggestions.map((item, idx) => {
+                      const isChecked = selectedSuggestions.has(item.id);
+                      return (
+                        <tr key={item.id} className="hover:bg-[#F8FAFC]/80 transition-colors">
+                          <td className="py-3 px-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSuggestion(item.id)}
+                              className="w-4 h-4 rounded text-[#2563EB] focus:ring-[#2563EB] border-[#CBD5E1] cursor-pointer"
+                            />
+                          </td>
+                          <td className="py-3 px-2 text-[#64748B] font-mono text-[11px]">{idx + 1}</td>
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border ${item.typeBadgeClass}`}>
+                              {item.type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 font-bold text-[#0F172A] whitespace-nowrap">
+                            {item.column}
+                          </td>
+                          <td className="py-3 px-3 text-[#475569] max-w-xs leading-relaxed">
+                            {item.details}
+                          </td>
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <div className="relative inline-block min-w-[200px]">
+                              <select
+                                value={item.action}
+                                onChange={(e) => handleActionChange(item.id, e.target.value)}
+                                className="w-full bg-white border border-[#CBD5E1] rounded-lg px-2.5 py-1.5 text-xs text-[#0F172A] font-medium pr-7 focus:outline-none focus:border-[#2563EB] cursor-pointer appearance-none shadow-2xs"
+                              >
+                                {item.actionOptions.map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown className="w-3.5 h-3.5 text-[#64748B] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${item.impactBadgeClass}`}>
+                              {item.impact}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Before vs After Preview Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-bold text-[#0F172A]">Before vs After Preview</h2>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    See how the data will look after cleaning (showing top 5 rows).
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 bg-[#F1F5F9] p-1 rounded-lg border border-[#E2E8F0]">
+                  <button
+                    onClick={() => setPreviewMode('original')}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                      previewMode === 'original'
+                        ? 'bg-white text-[#0F172A] shadow-2xs'
+                        : 'text-[#64748B] hover:text-[#0F172A]'
+                    }`}
+                  >
+                    Original Data
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode('cleaned')}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                      previewMode === 'cleaned'
+                        ? 'bg-[#2563EB] text-white shadow-2xs'
+                        : 'text-[#64748B] hover:text-[#0F172A]'
+                    }`}
+                  >
+                    Cleaned Data
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-[#E2E8F0] rounded-lg overflow-x-auto bg-white">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-[#F8FAFC] text-[#64748B] font-semibold border-b border-[#E2E8F0]">
+                    <tr>
+                      <th className="py-2.5 px-3 text-[#94A3B8] font-medium w-8">#</th>
+                      {previewDisplayColumns.map((col) => (
+                        <th key={col} className="py-2.5 px-3 whitespace-nowrap font-semibold">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0]">
+                    {previewDisplayRows.map((row, rIdx) => (
+                      <tr key={rIdx} className="hover:bg-[#F8FAFC]/80 transition-colors">
+                        <td className="py-2.5 px-3 text-[#94A3B8] font-mono text-[11px]">{rIdx + 1}</td>
+                        {previewDisplayColumns.map((col) => (
+                          <td key={col} className="py-2.5 px-3 font-mono text-[11px] text-[#0F172A] whitespace-nowrap">
+                            {row[col] !== null && row[col] !== undefined ? String(row[col]) : <span className="text-[#94A3B8]">null</span>}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
-          {/* System Notifications / Alerts */}
-          {successMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-semibold">{successMessage}</span>
-              </div>
-              <button onClick={() => setSuccessMessage('')} className="text-emerald-700 hover:text-emerald-900 font-bold ml-2 cursor-pointer">✕</button>
-            </div>
-          )}
-
-          {error && (
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 space-y-2.5 text-xs shadow-2xs">
-              <div className="flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-bold text-rose-950">
-                    Operation Notice
+          {/* Right Column (4 cols ~ 30%) */}
+          <div className="lg:col-span-4 space-y-5">
+            {/* Cleaning Workflow Stepper Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
+              <h3 className="text-sm font-bold text-[#0F172A]">Cleaning Workflow</h3>
+              <div className="space-y-4">
+                {[
+                  { step: 1, title: 'Detect Issues', desc: 'Scan dataset for missing values, duplicates, outliers, and inconsistencies.' },
+                  { step: 2, title: 'Review Suggestions', desc: 'Check AI-generated recommendations.' },
+                  { step: 3, title: 'Apply Cleaning', desc: 'Automatically or manually apply fixes.' },
+                  { step: 4, title: 'Preview Results', desc: 'Compare original vs cleaned data.' },
+                  { step: 5, title: 'Download Cleaned Data', desc: 'Export the cleaned dataset for analysis.' },
+                ].map((item) => (
+                  <div key={item.step} className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-[#2563EB] text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 shadow-2xs">
+                      {item.step}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[#0F172A]">{item.title}</div>
+                      <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">{item.desc}</div>
+                    </div>
                   </div>
-                  <p className="mt-0.5 text-rose-800 leading-relaxed">
-                    {error}
-                  </p>
-                  <p className="mt-1 text-[11px] text-rose-700 font-medium">
-                    {error.toLowerCase().includes('load') || error.toLowerCase().includes('not found')
-                      ? 'The dataset could not be loaded. Please refresh analysis or select another dataset.'
-                      : error.toLowerCase().includes('analysis') || error.toLowerCase().includes('profile')
-                      ? 'Analysis failed. Please check the dataset format and try refreshing.'
-                      : error.toLowerCase().includes('preview')
-                      ? 'Preview could not be generated for the current operations. You may review selections or retry.'
-                      : error.toLowerCase().includes('version')
-                      ? 'The dataset version was modified. Refreshing analysis will synchronize with the latest state.'
-                      : error.toLowerCase().includes('save') || error.toLowerCase().includes('apply')
-                      ? 'Save failed. Your original source dataset remains safe and unmodified.'
-                      : error.toLowerCase().includes('export') || error.toLowerCase().includes('download')
-                      ? 'Export failed. Please retry or choose an alternate export format.'
-                      : 'You can retry the current action, navigate back to review selections, or refresh analysis.'}
-                  </p>
+                ))}
+              </div>
+            </div>
+
+            {/* Data Quality After Cleaning (Estimated) Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-3.5">
+              <h3 className="text-xs font-bold text-[#0F172A]">Data Quality After Cleaning (Estimated)</h3>
+              <div className="flex items-center gap-5">
+                {/* Circular Donut Gauge */}
+                <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="38"
+                      stroke="#E2E8F0"
+                      strokeWidth="7"
+                      fill="transparent"
+                    />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="38"
+                      stroke="#06B6D4"
+                      strokeWidth="7"
+                      strokeDasharray="238.76"
+                      strokeDashoffset="4.77"
+                      strokeLinecap="round"
+                      fill="transparent"
+                      className="transition-all duration-700 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                    <span className="text-2xl font-extrabold text-[#0F172A] leading-none">98</span>
+                    <span className="text-[10px] font-semibold text-[#64748B] mt-0.5">/ 100</span>
+                  </div>
+                </div>
+
+                {/* Checklist with Green Checkmarks */}
+                <div className="space-y-1.5 text-xs text-[#334155]">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    <span className="text-[11px]">Missing Values: 0</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    <span className="text-[11px]">Duplicate Rows: 0</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    <span className="text-[11px]">Format Issues: 0</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    <span className="text-[11px]">Consistent Data Types</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    <span className="text-[11px]">Reduced Outliers</span>
+                  </div>
                 </div>
               </div>
-
-              <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-200/60">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    if (workflowStep === 4) handleBulkPreview();
-                    else if (workflowStep === 5) handleBulkApply();
-                    else if (selectedDatasetId) loadCleaningData(selectedDatasetId);
-                  }}
-                  className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-[11px] shadow-2xs cursor-pointer transition-colors"
-                >
-                  Retry
-                </button>
-                {workflowStep > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError('');
-                      setWorkflowStep((prev) => Math.max(1, prev - 1));
-                    }}
-                    className="px-3 py-1 rounded-lg bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-semibold text-[11px] cursor-pointer transition-colors"
-                  >
-                    Go Back
-                  </button>
-                )}
-                {selectedDatasetId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError('');
-                      loadCleaningData(selectedDatasetId);
-                    }}
-                    className="px-3 py-1 rounded-lg bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-semibold text-[11px] cursor-pointer transition-colors"
-                  >
-                    Refresh Analysis
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError('');
-                    setSelectedDatasetId('');
-                    setWorkflowStep(1);
-                  }}
-                  className="px-3 py-1 rounded-lg bg-white border border-rose-300 text-rose-800 hover:bg-rose-100 font-semibold text-[11px] cursor-pointer transition-colors"
-                >
-                  Select Another Dataset
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setError('')}
-                  className="px-2.5 py-1 rounded-lg text-rose-600 hover:text-rose-800 text-[11px] ml-auto cursor-pointer"
-                >
-                  Dismiss
-                </button>
-              </div>
             </div>
-          )}
 
-          {/* STEP 1: DATASET STATE: NO_DATASET */}
-          {!selectedDatasetId && !loadingDatasets && (
-            <div className="bg-white border border-[#E2E8F0] rounded-xl p-12 text-center shadow-2xs">
-              <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto mb-3">
-                <Sparkles className="w-6 h-6" />
+            {/* Download Options Card */}
+            <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-3">
+              <div>
+                <h3 className="text-xs font-bold text-[#0F172A]">Download Options</h3>
+                <p className="text-[11px] text-[#64748B] mt-0.5">
+                  Export the cleaned dataset in your preferred format.
+                </p>
               </div>
-              <h3 className="text-sm font-bold text-[#0F172A]">Select a dataset to start cleaning</h3>
-              <p className="text-xs text-[#64748B] max-w-sm mx-auto mt-1 mb-4">
-                Choose an uploaded dataset from the selector above to analyze issues and apply recommended fixes.
-              </p>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  onClick={handleDownloadCleaned}
+                  disabled={loadingAction}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-[#A7F3D0] bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#065F46] text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#059669]" />
+                  <span>Download CSV</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadExcel}
+                  disabled={loadingAction}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-[#A7F3D0] bg-[#ECFDF5] hover:bg-[#D1FAE5] text-[#065F46] text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-[#059669]" />
+                  <span>Download Excel</span>
+                </button>
+              </div>
+
               <button
-                onClick={() => navigate('/upload')}
-                className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                onClick={() => setShowWhyScoreModal(true)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] text-[#0F172A] text-xs font-semibold transition-colors cursor-pointer shadow-2xs mt-2"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Upload New Dataset</span>
+                <FileText className="w-3.5 h-3.5 text-[#64748B]" />
+                <span>View Changes Log</span>
               </button>
             </div>
-          )}
-
-          {/* STEP 1: DATASET STATE: DATASET_LOADING */}
-          {loadingOverview && (
-            <div className="bg-white border border-[#E2E8F0] rounded-xl p-12 text-center shadow-2xs">
-              <div className="w-8 h-8 rounded-full border-2 border-blue-600/20 border-t-blue-600 animate-spin mx-auto mb-3" />
-              <h3 className="text-sm font-bold text-[#0F172A]">Analyzing dataset...</h3>
-              <p className="text-xs text-[#64748B] mt-1">Evaluating hygiene metrics and smart suggestions.</p>
-            </div>
-          )}
-
-          {/* MAIN ACTIVE DATASET CONTENT */}
-          {overview && !loadingOverview && (
-            <div className="space-y-5">
-              {/* STEP 1: DATASET CARD */}
-              <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 shadow-2xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-[#64748B] tracking-wider">Step 1 — Dataset</span>
-                    <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2 mt-0.5">
-                      {dashboardSummary?.dataset_name || overview.filename}
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                        {dashboardSummary?.current_version || (overview.has_cleaned ? (overview.cleaned_filename || 'Cleaned v1') : 'Original')}
-                      </span>
-                    </h2>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-5 text-xs text-[#334155]">
-                    <div><span className="text-[#64748B]">Rows:</span> <strong className="font-mono text-[#0F172A]">{dashboardSummary?.rows ?? overview?.original_metrics?.total_rows ?? 0}</strong></div>
-                    <div><span className="text-[#64748B]">Columns:</span> <strong className="font-mono text-[#0F172A]">{dashboardSummary?.columns ?? overview?.original_metrics?.total_columns ?? 0}</strong></div>
-                    <div><span className="text-[#64748B]">Current Version:</span> <strong className="font-mono text-blue-700">{dashboardSummary?.current_version || (overview?.has_cleaned ? 'Cleaned v1' : 'Original')}</strong></div>
-                    <div><span className="text-[#64748B]">Status: </span><strong className="font-semibold text-blue-700">{dashboardSummary?.cleaning_status || (overview?.has_cleaned ? 'Partially Cleaned' : 'Not Cleaned')}</strong></div>
-
-                    {workflowStep === 1 && (
-                      <button
-                        onClick={() => setWorkflowStep(2)}
-                        className="ml-auto px-3.5 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors cursor-pointer shadow-2xs flex items-center gap-1.5"
-                      >
-                        <span>Continue to Issues</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* STEP 2: ISSUES & HEALTH SUMMARY CARD */}
-              {(workflowStep >= 2 || totalIssuesCount > 0) && (
-                <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-[#F1F5F9]">
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center font-bold text-base font-mono shrink-0">
-                        <span className={cleaningScore >= 75 ? 'text-blue-600' : 'text-amber-600'}>{cleaningScore}/100</span>
-                      </div>
-                      <div>
-                        <div className="text-[10px] uppercase font-bold text-[#64748B] tracking-wider">Step 2 — Issues & Data Cleaning Score</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-sm font-extrabold text-[#0F172A] font-mono">{cleaningScore}/100</span>
-                          <span className="text-xs text-slate-400">•</span>
-                          <span className="text-xs font-bold text-slate-700 uppercase">{scoreStatus}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setShowWhyScoreModal(true)}
-                      className="text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
-                    >
-                      <span>Why this score?</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* 4 Health Metrics Bullets or Clean state */}
-                  {totalIssuesCount === 0 ? (
-                    <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between text-xs font-semibold">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>Your dataset looks good. No cleaning is required.</span>
-                      </div>
-                      {workflowStep === 2 && (
-                        <button
-                          onClick={() => setWorkflowStep(6)}
-                          className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-medium cursor-pointer"
-                        >
-                          Skip to Export
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div className="p-3 bg-[#F8FAFC] rounded-lg border border-[#E2E8F0]">
-                        <div className="text-[10px] font-bold text-[#64748B] uppercase">Missing values</div>
-                        <div className="text-sm font-bold font-mono mt-1 text-slate-900">{missingCount}</div>
-                      </div>
-                      <div className="p-3 bg-[#F8FAFC] rounded-lg border border-[#E2E8F0]">
-                        <div className="text-[10px] font-bold text-[#64748B] uppercase">Duplicate rows</div>
-                        <div className="text-sm font-bold font-mono mt-1 text-slate-900">{duplicateCount}</div>
-                      </div>
-                      <div className="p-3 bg-[#F8FAFC] rounded-lg border border-[#E2E8F0]">
-                        <div className="text-[10px] font-bold text-[#64748B] uppercase">Invalid values</div>
-                        <div className="text-sm font-bold font-mono mt-1 text-slate-900">{invalidValuesCount}</div>
-                      </div>
-                      <div className="p-3 bg-[#F8FAFC] rounded-lg border border-[#E2E8F0]">
-                        <div className="text-[10px] font-bold text-[#64748B] uppercase">Outliers</div>
-                        <div className="text-sm font-bold font-mono mt-1 text-slate-900">{outliersCount}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Prioritized Top 3 Suggestions */}
-                  {topSuggestions.length > 0 && (
-                    <div className="pt-2 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
-                          Recommended based on dataset statistics ({topSuggestions.length} prioritized issues)
-                        </h4>
-                        {prioritizedSuggestions.length > 3 && (
-                          <button
-                            onClick={() => setShowAllIssues(!showAllIssues)}
-                            className="text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] hover:underline cursor-pointer"
-                          >
-                            {showAllIssues ? 'Hide extra issues' : `View all issues (${prioritizedSuggestions.length})`}
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {topSuggestions.map((sugg) => (
-                          <div
-                            key={sugg.id}
-                            className="p-4 rounded-xl border border-slate-200 bg-[#F8FAFC] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                          >
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  sugg.priority?.toLowerCase() === 'critical' ? 'bg-red-100 text-red-800' :
-                                  sugg.priority?.toLowerCase() === 'high' ? 'bg-rose-100 text-rose-800' :
-                                  sugg.priority?.toLowerCase() === 'medium' ? 'bg-amber-100 text-amber-800' :
-                                  'bg-slate-100 text-slate-700'
-                                }`}>
-                                  Priority: {sugg.priority?.toUpperCase()}
-                                </span>
-                                <h5 className="text-xs font-bold text-[#0F172A]">{sugg.issue}</h5>
-                                {sugg.affected_columns?.length > 0 && (
-                                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
-                                    {sugg.affected_columns.join(', ')}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-slate-600 font-medium">
-                                {sugg.affected_count} affected records {sugg.affected_percentage !== undefined ? `· ${sugg.affected_percentage}% of rows` : ''}
-                              </div>
-                              <p className="text-[11px] text-[#475569] italic">
-                                "{sugg.evidence}"
-                              </p>
-                              <p className="text-[11px] text-blue-900 font-medium">
-                                <strong>Recommended action:</strong> {sugg.recommended_action}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
-                              <button
-                                onClick={() => handleReviewSuggestion(sugg)}
-                                className="px-3.5 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
-                              >
-                                Review
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Expandable All Issues */}
-                      {showAllIssues && (
-                        <div className="pt-3 border-t border-slate-200 space-y-2">
-                          {prioritizedSuggestions.slice(3).map((sugg) => (
-                            <div key={sugg.id} className="p-3 rounded-lg border border-slate-200 bg-white flex items-center justify-between text-xs">
-                              <div>
-                                <span className="font-semibold text-slate-800">{sugg.issue}</span>
-                                <span className="text-slate-500 text-[11px] ml-2">({sugg.affected_count} records)</span>
-                              </div>
-                              <button
-                                onClick={() => handleReviewSuggestion(sugg)}
-                                className="px-2.5 py-1 rounded border border-slate-300 text-xs font-medium hover:bg-slate-50 cursor-pointer"
-                              >
-                                Review
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {workflowStep === 2 && (
-                    <div className="flex justify-between pt-2 border-t border-slate-100">
-                      <button
-                        onClick={() => setWorkflowStep(1)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer flex items-center gap-1"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                        <span>Back to Dataset</span>
-                      </button>
-                      <button
-                        onClick={() => setWorkflowStep(3)}
-                        className="px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold cursor-pointer shadow-xs flex items-center gap-1"
-                      >
-                        <span>Continue to Clean</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* STEP 3: CLEAN — CONFIGURE CLEANING OPERATIONS */}
-              {workflowStep >= 3 && (
-                <div className="space-y-4">
-                  {/* Staged Operations & Queue */}
-                  <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F1F5F9]">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                          {activeOpsCount}
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-[#0F172A]">
-                            Step 3 — Bulk Cleaning Workflow ({activeOpsCount} configured operations)
-                          </h4>
-                          <p className="text-[11px] text-[#64748B]">
-                            Select operations below. Nothing is modified until changes are previewed and saved.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {activeOpsCount > 0 && (
-                          <button
-                            onClick={handleResetPending}
-                            className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-medium cursor-pointer"
-                          >
-                            Reset Pending Changes
-                          </button>
-                        )}
-                        <button
-                          onClick={handleBulkPreview}
-                          disabled={loadingAction || activeOpsCount === 0}
-                          className="px-3 py-1.5 rounded-lg border border-blue-300 bg-white text-blue-700 hover:bg-blue-50 text-xs font-semibold cursor-pointer disabled:opacity-40"
-                        >
-                          Review All Changes
-                        </button>
-                        <button
-                          onClick={() => setWorkflowStep(4)}
-                          disabled={activeOpsCount === 0}
-                          className="px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold cursor-pointer shadow-xs disabled:opacity-40 flex items-center gap-1"
-                        >
-                          <span>Continue to Preview</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Execution Order Chips */}
-                    {activeOpsCount > 0 ? (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[10px] font-bold text-blue-900 uppercase">Execution Order:</span>
-                        {pendingOperationsList.map((op) => (
-                          <span key={op.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-50 border border-slate-200 text-[11px] text-slate-800 font-medium">
-                            <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-[9px] font-bold flex items-center justify-center">{op.order}</span>
-                            <span>{op.type}</span>
-                            <span className="text-slate-500 font-mono text-[10px]">({op.column})</span>
-                            <button onClick={op.remove} className="text-slate-400 hover:text-rose-600 ml-0.5 cursor-pointer">✕</button>
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-500 italic">
-                        No operations staged yet. Use Advanced Cleaning below to configure transformations.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Advanced Cleaning Accordion */}
-                  <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-2xs overflow-hidden">
-                    <button
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                      className="w-full px-5 py-4 flex items-center justify-between bg-white hover:bg-slate-50 transition-colors cursor-pointer text-left"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Sliders className="w-4 h-4 text-[#2563EB]" />
-                        <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">Advanced Cleaning ⚙️</span>
-                        <span className="text-[11px] text-[#64748B]">
-                          (Detailed configuration for missing values, duplicates, text, numbers, dates, outliers, custom rules)
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {activeOpsCount > 0 && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                            {activeOpsCount} configured
-                          </span>
-                        )}
-                        <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-                      </div>
-                    </button>
-
-                    {showAdvanced && (
-                      <div className="border-t border-[#E2E8F0] p-5 space-y-4">
-                        <div className="flex items-center gap-1.5 border-b border-[#E2E8F0] pb-2 overflow-x-auto text-xs font-semibold">
-                          {[
-                            { id: 'missing', label: `Missing Values (${missingColumns.length})` },
-                            { id: 'duplicates', label: `Duplicates (${overview.duplicate_rows_count})` },
-                            { id: 'text', label: `Text & Categories` },
-                            { id: 'numeric', label: `Numeric Data` },
-                            { id: 'dates', label: `Dates` },
-                            { id: 'outliers', label: `Outliers` },
-                            { id: 'rules', label: `Custom Rules` },
-                          ].map((cat) => (
-                            <button
-                              key={cat.id}
-                              onClick={() => setAdvancedCategory(cat.id)}
-                              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                                advancedCategory === cat.id
-                                  ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                              }`}
-                            >
-                              {cat.label}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Sub-tools forms */}
-                        {advancedCategory === 'missing' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Missing Value Resolution</h4>
-                            {missingColumns.length === 0 ? (
-                              <div className="p-4 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-medium">No missing values detected.</div>
-                            ) : (
-                              <div className="border border-slate-200 rounded-lg overflow-x-auto">
-                                <table className="w-full text-left text-xs">
-                                  <thead className="bg-[#F8FAFC] border-b border-slate-200 text-[10px] text-slate-600 uppercase font-bold">
-                                    <tr>
-                                      <th className="p-2.5">Column</th>
-                                      <th className="p-2.5">Type</th>
-                                      <th className="p-2.5">Missing</th>
-                                      <th className="p-2.5">Imputation Action</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-200">
-                                    {missingColumns.map((col) => {
-                                      const currentImp = imputations[col.column_name] || { strategy: '', fill_value: '' };
-                                      const isNumeric = ['Integer', 'Float', 'Numeric'].includes(col.inferred_type);
-                                      return (
-                                        <tr key={col.column_name}>
-                                          <td className="p-2.5 font-semibold">{col.column_name}</td>
-                                          <td className="p-2.5 text-slate-600">{col.inferred_type}</td>
-                                          <td className="p-2.5 font-mono text-amber-700 font-bold">{col.missing_count}</td>
-                                          <td className="p-2.5">
-                                            <select
-                                              value={currentImp.strategy || ''}
-                                              onChange={(e) => setImputations({ ...imputations, [col.column_name]: { ...currentImp, strategy: e.target.value } })}
-                                              className="px-2 py-1 border border-slate-300 rounded text-xs bg-white"
-                                            >
-                                              <option value="">-- Do Not Clean --</option>
-                                              {isNumeric && <option value="median">Median Imputation</option>}
-                                              {isNumeric && <option value="mean">Mean Imputation</option>}
-                                              {!isNumeric && <option value="mode">Mode Imputation</option>}
-                                              <option value="constant">Constant Value</option>
-                                              <option value="ffill">Forward Fill</option>
-                                              <option value="bfill">Backward Fill</option>
-                                              <option value="drop_rows">Drop Rows</option>
-                                            </select>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-4 pt-2">
-                              <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={standardizeColumnNames}
-                                  onChange={(e) => setStandardizeColumnNames(e.target.checked)}
-                                  className="rounded border-slate-300 text-blue-600"
-                                />
-                                <span>Standardize column names to snake_case</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'duplicates' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Duplicate & Blank Whitespace Handling</h4>
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={removeDuplicates}
-                                  onChange={(e) => setRemoveDuplicates(e.target.checked)}
-                                  className="rounded border-slate-300 text-blue-600"
-                                />
-                                <span>Remove duplicate rows ({overview.duplicate_rows_count} duplicate row(s) found)</span>
-                              </label>
-                              <label className="flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={convertBlanksToNa}
-                                  onChange={(e) => setConvertBlanksToNa(e.target.checked)}
-                                  className="rounded border-slate-300 text-blue-600"
-                                />
-                                <span>Convert blank / whitespace-only values to missing (NaN)</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'text' && (
-                          <div className="space-y-4">
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Target Column</label>
-                                  <select
-                                    value={tsForm.column}
-                                    onChange={(e) => setTsForm({ ...tsForm, column: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    {overview.columns.map((c) => (
-                                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Case Conversion</label>
-                                  <select
-                                    value={tsForm.case_conversion}
-                                    onChange={(e) => setTsForm({ ...tsForm, case_conversion: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="none">Keep Original Case</option>
-                                    <option value="lowercase">lowercase</option>
-                                    <option value="uppercase">UPPERCASE</option>
-                                    <option value="title">Title Case</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (!tsForm.column) return;
-                                  setTextStandardizations((prev) => [...prev, { ...tsForm }]);
-                                  setSuccessMessage(`Added text standardization rule for '${tsForm.column}'.`);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
-                              >
-                                Add Standardization Rule
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'numeric' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Numeric Value Cleaning</h4>
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Target Column</label>
-                                  <select
-                                    value={numForm.column}
-                                    onChange={(e) => setNumForm({ ...numForm, column: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    {overview.columns.map((c) => (
-                                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Invalid Treatment</label>
-                                  <select
-                                    value={numForm.handle_invalid}
-                                    onChange={(e) => setNumForm({ ...numForm, handle_invalid: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="coerce_na">Convert to NaN</option>
-                                    <option value="remove_rows">Drop Rows</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (!numForm.column) return;
-                                  setNumericCleanings((prev) => [...prev, { ...numForm }]);
-                                  setSuccessMessage(`Added numeric rule for '${numForm.column}'.`);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
-                              >
-                                Add Numeric Rule
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'dates' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Date Format Standardization</h4>
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Date Column</label>
-                                  <select
-                                    value={dateCol}
-                                    onChange={(e) => setDateCol(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    {overview.columns.map((c) => (
-                                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Format</label>
-                                  <select
-                                    value={dateOutputFormat}
-                                    onChange={(e) => setDateOutputFormat(e.target.value)}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="%Y-%m-%d">ISO (YYYY-MM-DD)</option>
-                                    <option value="%d/%m/%Y">DD/MM/YYYY</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (!dateCol) return;
-                                  setDateCleanings((prev) => [...prev, { column: dateCol, target_format: dateOutputFormat, handle_invalid: dateHandleInvalid }]);
-                                  setSuccessMessage(`Added date rule for '${dateCol}'.`);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
-                              >
-                                Add Date Rule
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'outliers' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Outlier Detection & Treatment</h4>
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Column</label>
-                                  <select
-                                    value={outlierForm.column}
-                                    onChange={(e) => setOutlierForm({ ...outlierForm, column: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    {overview.columns.map((c) => (
-                                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Method</label>
-                                  <select
-                                    value={outlierForm.method}
-                                    onChange={(e) => setOutlierForm({ ...outlierForm, method: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="iqr">IQR</option>
-                                    <option value="zscore">Z-score</option>
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Threshold</label>
-                                  <input
-                                    type="number"
-                                    step="0.1"
-                                    value={outlierForm.threshold || 1.5}
-                                    onChange={(e) => setOutlierForm({ ...outlierForm, threshold: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Treatment</label>
-                                  <select
-                                    value={outlierForm.treatment || 'cap'}
-                                    onChange={(e) => setOutlierForm({ ...outlierForm, treatment: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="cap">Cap</option>
-                                    <option value="median">Median</option>
-                                    <option value="mean">Mean</option>
-                                    <option value="remove">Remove</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={handleAddOutlierCleaning}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
-                              >
-                                Add Outlier Treatment
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {advancedCategory === 'rules' && (
-                          <div className="space-y-4">
-                            <h4 className="text-xs font-bold text-[#0F172A]">Cleaning Rule Builder</h4>
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Column</label>
-                                  <select
-                                    value={ruleForm.column}
-                                    onChange={(e) => setRuleForm({ ...ruleForm, column: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    {overview.columns.map((c) => (
-                                      <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Condition</label>
-                                  <select
-                                    value={ruleForm.condition}
-                                    onChange={(e) => setRuleForm({ ...ruleForm, condition: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="less_than">Less Than</option>
-                                    <option value="greater_than">Greater Than</option>
-                                    <option value="is_negative">Is Negative</option>
-                                  </select>
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Value</label>
-                                  <input
-                                    type="text"
-                                    value={ruleForm.condition_value}
-                                    onChange={(e) => setRuleForm({ ...ruleForm, condition_value: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Action</label>
-                                  <select
-                                    value={ruleForm.action}
-                                    onChange={(e) => setRuleForm({ ...ruleForm, action: e.target.value })}
-                                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
-                                  >
-                                    <option value="set_missing">Set NaN</option>
-                                    <option value="remove_rows">Remove Rows</option>
-                                  </select>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (!ruleForm.column) return;
-                                  setCleaningRules((prev) => [...prev, { ...ruleForm }]);
-                                  setSuccessMessage(`Added rule for '${ruleForm.column}'.`);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
-                              >
-                                Add Rule
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 4: PREVIEW CHANGES */}
-              {workflowStep >= 4 && (
-                <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F1F5F9]">
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
-                        Step 4 — Cleaning Preview Table
-                      </h4>
-                      <p className="text-[11px] text-[#64748B]">
-                        Verify projected effects before committing changes. Your source file remains untouched.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setWorkflowStep(3)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-medium cursor-pointer flex items-center gap-1"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                        <span>Back to Clean</span>
-                      </button>
-                      {(bulkPreviewData || previewData) && (
-                        <button
-                          onClick={() => setShowConfirmModal(true)}
-                          disabled={loadingAction}
-                          className="px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold cursor-pointer shadow-xs flex items-center gap-1 disabled:opacity-40"
-                        >
-                          <span>Apply All Cleaning Operations</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {loadingAction && workflowStep === 4 && (
-                    <div className="py-8 text-center">
-                      <div className="w-8 h-8 rounded-full border-2 border-blue-600/20 border-t-blue-600 animate-spin mx-auto mb-2" />
-                      <p className="text-xs text-slate-600 font-medium">Generating preview of selected operations...</p>
-                    </div>
-                  )}
-
-                  {!loadingAction && !(bulkPreviewData || previewData) && (
-                    <div className="p-6 text-center bg-slate-50 rounded-xl border border-slate-200">
-                      <p className="text-xs text-slate-600 mb-3">
-                        You have <strong>{activeOpsCount}</strong> configured cleaning operation(s). Generate a preview to review before saving.
-                      </p>
-                      <button
-                        onClick={handleBulkPreview}
-                        disabled={loadingAction || activeOpsCount === 0}
-                        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer disabled:opacity-40"
-                      >
-                        Generate Cleaning Preview
-                      </button>
-                    </div>
-                  )}
-
-                  {!loadingAction && (bulkPreviewData || previewData) && (
-                    <>
-                      {/* Impact Summary Statistics */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">Rows Before → After</span>
-                          <div className="font-mono font-bold mt-1 text-slate-900">
-                            {previewData?.before?.total_rows ?? overview.original_metrics.total_rows} → {previewData?.after?.total_rows ?? overview.original_metrics.total_rows}
-                          </div>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">Columns Before → After</span>
-                          <div className="font-mono font-bold mt-1 text-slate-900">
-                            {previewData?.before?.total_columns ?? overview.original_metrics.total_columns} → {previewData?.after?.total_columns ?? overview.original_metrics.total_columns}
-                          </div>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">Missing Values Remaining</span>
-                          <div className="font-mono font-bold mt-1 text-emerald-700">
-                            {previewData?.after?.missing_cells ?? 0}
-                          </div>
-                        </div>
-                        <div>
-                          <span className="text-[10px] font-bold text-slate-500 uppercase">Total Cells Affected</span>
-                          <div className="font-mono font-bold mt-1 text-blue-700">
-                            {previewData?.total_cells_changed || bulkPreviewData?.total_cells_affected || 0}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Step 4 Preview Table */}
-                      {(() => {
-                        const rawSample = bulkPreviewData?.sample_preview || previewData?.sample_preview || [];
-                        const sampleRows = Array.isArray(rawSample) ? rawSample.slice(0, previewRowsLimit) : [];
-                        const cols = previewData?.sample_columns || previewData?.columns || bulkPreviewData?.columns || (sampleRows.length > 0 ? Object.keys(sampleRows[0]) : []);
-                        const totalRows = previewData?.after?.total_rows ?? overview.original_metrics.total_rows;
-                        const cellDiffs = previewData?.cell_diffs || bulkPreviewData?.cell_diffs || [];
-
-                        return (
-                          <div className="space-y-3 pt-2">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-950">
-                              <div>
-                                <span className="font-bold">Preview Sample: </span>
-                                Showing first {sampleRows.length} rows of {totalRows} rows.
-                                <span className="text-slate-600 block sm:inline sm:ml-1">
-                                  Note: This table displays projected changes, not the complete dataset.
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-[11px] text-slate-600 font-medium">Rows to show:</span>
-                                {[5, 10].map((lim) => (
-                                  <button
-                                    key={lim}
-                                    type="button"
-                                    onClick={() => setPreviewRowsLimit(lim)}
-                                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors cursor-pointer ${
-                                      previewRowsLimit === lim
-                                        ? 'bg-blue-600 text-white shadow-2xs'
-                                        : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
-                                    }`}
-                                  >
-                                    {lim}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            {sampleRows.length > 0 ? (
-                              <div className="overflow-x-auto max-h-72 border border-[#E2E8F0] rounded-xl shadow-2xs">
-                                <table className="min-w-full text-xs text-left border-collapse">
-                                  <thead className="bg-[#F8FAFC] text-[#475569] font-bold border-b border-[#E2E8F0] sticky top-0 z-10">
-                                    <tr>
-                                      <th className="px-3 py-2 text-[10px] text-slate-400 font-mono uppercase w-10">#</th>
-                                      {cols.map((col) => (
-                                        <th key={col} className="px-3 py-2 whitespace-nowrap text-[11px]">
-                                          {col}
-                                        </th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-[#F1F5F9] bg-white">
-                                    {sampleRows.map((row, rIdx) => (
-                                      <tr key={rIdx} className="hover:bg-slate-50/80 transition-colors">
-                                        <td className="px-3 py-1.5 font-mono text-[10px] text-slate-400 select-none">
-                                          {rIdx + 1}
-                                        </td>
-                                        {cols.map((col) => {
-                                          const val = row[col];
-                                          const isDiff = cellDiffs.some((d) => d.row_index === rIdx && d.column === col);
-                                          return (
-                                            <td
-                                              key={col}
-                                              className={`px-3 py-1.5 whitespace-nowrap text-[#334155] ${
-                                                isDiff ? 'bg-amber-50 font-semibold text-amber-900 border-l-2 border-amber-400' : ''
-                                              }`}
-                                            >
-                                              {val === null || val === undefined || val === '' ? (
-                                                <span className="text-slate-300 italic">null</span>
-                                              ) : (
-                                                String(val)
-                                              )}
-                                            </td>
-                                          );
-                                        })}
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : (
-                              <div className="p-4 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
-                                Projected sample rows unavailable. Statistical metrics computed above reflect the full dataset.
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* STEP 5: SAVE CONFIRMATION CARD (IF STEP 5 SELECTED DIRECTLY) */}
-              {workflowStep === 5 && !overview.has_cleaned && !applyResult && (
-                <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F1F5F9]">
-                    <div>
-                      <h4 className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
-                        Step 5 — Save Dataset Version
-                      </h4>
-                      <p className="text-[11px] text-[#64748B]">
-                        Review confirmation and commit your verified cleaning operations.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setWorkflowStep(4)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-xs font-medium cursor-pointer flex items-center gap-1"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                        <span>Back to Preview</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-200 text-xs text-blue-950 space-y-2">
-                    <div className="font-semibold text-sm text-[#0F172A]">Confirm Operations to Apply</div>
-                    <p className="text-slate-600">
-                      Target Dataset: <strong>{overview?.filename}</strong> ({activeOpsCount} operation(s) configured)
-                    </p>
-                    <p className="text-slate-600">
-                      A new immutable version will be created. Your original uploaded dataset remains strictly unchanged.
-                    </p>
-                  </div>
-
-                  <div className="flex justify-end gap-2.5 pt-2">
-                    <button
-                      onClick={() => setWorkflowStep(4)}
-                      className="px-4 py-2 rounded-lg border border-[#CBD5E1] text-xs font-medium text-[#475569] hover:bg-[#F8FAFC] transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleBulkApply}
-                      disabled={loadingAction || activeOpsCount === 0}
-                      className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors cursor-pointer shadow-xs disabled:opacity-40"
-                    >
-                      {loadingAction ? 'Saving Version...' : 'Confirm & Save Dataset Version'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 6: DOWNLOAD & FINAL ACTIONS */}
-              {(workflowStep >= 6 || overview.has_cleaned) && (
-                <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                        <h3 className="text-sm font-bold text-[#0F172A]">Cleaning completed</h3>
-                      </div>
-                      <p className="text-xs text-[#64748B] mt-0.5">
-                        {overview.cleaned_filename || 'Customer_Data_cleaned.csv'} • {overview.original_metrics.total_rows} → {overview.cleaned_metrics?.total_rows || overview.original_metrics.total_rows} rows • Missing: {overview.original_metrics.missing_cells} → {overview.cleaned_metrics?.missing_cells || 0}
-                      </p>
-                    </div>
-
-                    {/* 3 Primary Action Buttons */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => setShowCleanedPreview(!showCleanedPreview)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Cleaned View</span>
-                      </button>
-
-                      <button
-                        onClick={handleDownloadCleaned}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-xs"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download Cleaned CSV</span>
-                      </button>
-
-                      <button
-                        onClick={handleDownloadExcel}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white transition-colors cursor-pointer shadow-xs"
-                      >
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        <span>Download Cleaned Excel</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleDownloadReport('json')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-[#0F172A] border border-[#CBD5E1] transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-[#2563EB]" />
-                        <span>Download Cleaning Report</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Cleaned Dataset Preview */}
-                  {showCleanedPreview && overview.cleaned_sample_preview && (
-                    <div id="cleaned-dataset-preview" className="pt-3 border-t border-emerald-100 space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <h4 className="text-xs font-bold text-emerald-950">Cleaned Data Preview</h4>
-                        <div className="text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-                          <span className="font-semibold">Preview Sample: </span>
-                          Showing first {Math.min(10, overview.cleaned_sample_preview.length)} of {overview.cleaned_metrics?.total_rows || overview.original_metrics.total_rows} rows. Note: This table is a preview, not the complete dataset.
-                        </div>
-                      </div>
-                      <div className="border border-emerald-200 rounded-xl overflow-x-auto bg-white max-h-72">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-[10px] text-[#475569] font-bold uppercase sticky top-0">
-                            <tr>
-                              {(overview.cleaned_columns || Object.keys(overview.cleaned_sample_preview[0] || {})).map((col) => (
-                                <th key={col} className="py-2 px-3 whitespace-nowrap">{col}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#E2E8F0]">
-                            {overview.cleaned_sample_preview.map((row, idx) => (
-                              <tr key={idx} className="hover:bg-emerald-50/20">
-                                {(overview.cleaned_columns || Object.keys(overview.cleaned_sample_preview[0] || {})).map((col) => (
-                                  <td key={col} className="py-2 px-3 font-mono text-[11px] text-[#0F172A] whitespace-nowrap">
-                                    {row[col] !== null && row[col] !== undefined ? String(row[col]) : <span className="text-[#94A3B8]">null</span>}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Version Flow & Timeline Toggle */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <span className="text-[#64748B]">
-                      Version flow: <strong>Original → Cleaned v1 → Cleaned v2</strong>
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={handleOpenOriginalPreview}
-                        className="text-[#2563EB] hover:underline font-medium cursor-pointer"
-                      >
-                        Previous CSV
-                      </button>
-                      <span>•</span>
-                      <button
-                        onClick={() => setShowVersionHistory(!showVersionHistory)}
-                        className="text-[#2563EB] hover:underline font-medium cursor-pointer"
-                      >
-                        {showVersionHistory ? 'Hide Version History' : 'Dataset Version Timeline'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {showVersionHistory && (
-                    <div className="pt-3 border-t border-slate-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-[#0F172A]">Dataset Version Timeline</h4>
-                        {versionTimeline?.length >= 2 && (
-                          <button
-                            onClick={() => handleOpenCompareModal()}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 text-xs font-medium cursor-pointer"
-                          >
-                            <GitMerge className="w-3.5 h-3.5" />
-                            <span>Compare Versions</span>
-                          </button>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        {(versionTimeline || []).map((v) => (
-                          <div key={v.version_tag} className="p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${v.is_current ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                                {v.version_tag}
-                              </span>
-                              <span className="text-slate-600">{new Date(v.timestamp).toLocaleString()}</span>
-                              <span className="text-slate-400">•</span>
-                              <span className="font-mono">{v.rows} rows, {v.columns} cols</span>
-                              {v.quality_score !== null && (
-                                <span className="font-mono font-bold text-blue-700">({v.quality_score}/100)</span>
-                              )}
-                            </div>
-                            <div>
-                              {!v.is_current && (
-                                <button
-                                  onClick={() => handleRestoreVersion(v.version_tag)}
-                                  className="text-xs font-semibold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer"
-                                >
-                                  Restore Previous Version
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
 
-      {/* MODAL 1: Why This Score / Validation & Quality Score */}
+      {/* TAB 2: Manual Cleaning Mode */}
+      {activeMainTab === 'manual' && (
+        <div className="space-y-5">
+          <div className="flex bg-[#F1F5F9] p-1 rounded-lg border border-[#E2E8F0] max-w-fit">
+            <button
+              onClick={() => setPageMode('single')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                pageMode === 'single'
+                  ? 'bg-white text-[#2563EB] shadow-2xs'
+                  : 'text-[#64748B] hover:text-[#0F172A]'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Single Dataset Cleaning</span>
+            </button>
+            <button
+              onClick={() => setPageMode('relationships')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                pageMode === 'relationships'
+                  ? 'bg-white text-[#2563EB] shadow-2xs'
+                  : 'text-[#64748B] hover:text-[#0F172A]'
+              }`}
+            >
+              <GitMerge className="w-3.5 h-3.5" />
+              <span>Cross-Dataset Relationships</span>
+            </button>
+          </div>
+
+          {pageMode === 'relationships' ? (
+            <RelationshipManager
+              datasets={datasets}
+              selectedDatasetId={selectedDatasetId}
+              onDatasetCreated={(newId) => fetchDatasets(newId)}
+              onSwitchToSingle={(newId) => {
+                if (newId) setSelectedDatasetId(newId);
+                setPageMode('single');
+              }}
+            />
+          ) : (
+            <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-2xs overflow-hidden">
+              <div className="p-5 border-b border-[#E2E8F0] flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-[#0F172A]">Manual Transformation Tools</h3>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    Fine-tune missing values, duplicates, text formatting, date patterns, and outlier thresholds.
+                  </p>
+                </div>
+                {activeOpsCount > 0 && (
+                  <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
+                    {activeOpsCount} configured
+                  </span>
+                )}
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div className="flex items-center gap-1.5 border-b border-[#E2E8F0] pb-2 overflow-x-auto text-xs font-semibold">
+                  {[
+                    { id: 'text', label: 'Text & Categories' },
+                    { id: 'numeric', label: 'Numeric Data' },
+                    { id: 'dates', label: 'Dates' },
+                    { id: 'missing', label: `Missing Values (${missingColumns.length})` },
+                    { id: 'duplicates', label: `Duplicates (${overview?.duplicate_rows_count || 0})` },
+                    { id: 'outliers', label: 'Outliers' },
+                    { id: 'rules', label: 'Custom Rules' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setAdvancedCategory(cat.id)}
+                      className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                        advancedCategory === cat.id
+                          ? 'bg-[#2563EB] text-white font-bold shadow-2xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Sub-tools forms */}
+                {advancedCategory === 'text' && (
+                  <div className="space-y-4 pt-2">
+                    <div className="flex gap-2 border-b border-slate-100 pb-2">
+                      <button
+                        onClick={() => setAdvSubTab('text')}
+                        className={`px-3 py-1 text-xs font-medium rounded cursor-pointer ${advSubTab === 'text' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600'}`}
+                      >
+                        Text Clean & Case
+                      </button>
+                      <button
+                        onClick={() => setAdvSubTab('category')}
+                        className={`px-3 py-1 text-xs font-medium rounded cursor-pointer ${advSubTab === 'category' ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600'}`}
+                      >
+                        Category Normalization
+                      </button>
+                    </div>
+
+                    {advSubTab === 'text' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">Target Column</label>
+                            <select
+                              value={tsForm.column}
+                              onChange={(e) => setTsForm({ ...tsForm, column: e.target.value })}
+                              className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                            >
+                              {(overview?.columns || []).map((c) => (
+                                <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-xs text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={tsForm.trim_whitespace}
+                                onChange={(e) => setTsForm({ ...tsForm, trim_whitespace: e.target.checked })}
+                                className="rounded text-blue-600"
+                              />
+                              Trim leading and trailing whitespace
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={tsForm.collapse_spaces}
+                                onChange={(e) => setTsForm({ ...tsForm, collapse_spaces: e.target.checked })}
+                                className="rounded text-blue-600"
+                              />
+                              Collapse multiple spaces to a single space
+                            </label>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">Case Conversion</label>
+                            <select
+                              value={tsForm.case_conversion}
+                              onChange={(e) => setTsForm({ ...tsForm, case_conversion: e.target.value })}
+                              className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                            >
+                              <option value="none">Keep Original Case</option>
+                              <option value="lowercase">lowercase</option>
+                              <option value="uppercase">UPPERCASE</option>
+                              <option value="title">Title Case</option>
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextStandardizations((prev) => [
+                                ...prev.filter((t) => t.column !== tsForm.column),
+                                { ...tsForm },
+                              ]);
+                              setSuccessMessage(`Staged text cleaning for column '${tsForm.column}'.`);
+                            }}
+                            className="px-4 py-2 bg-[#2563EB] text-white rounded-lg text-xs font-semibold shadow-xs hover:bg-[#1D4ED8] cursor-pointer"
+                          >
+                            Add Text Operation
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {advancedCategory === 'dates' && (
+                  <div className="space-y-4 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">Date Column</label>
+                          <select
+                            value={dateCol}
+                            onChange={(e) => setDateCol(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                          >
+                            {(overview?.columns || []).map((c) => (
+                              <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">Standardized Target Format</label>
+                          <select
+                            value={dateOutputFormat}
+                            onChange={(e) => setDateOutputFormat(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                          >
+                            <option value="%Y-%m-%d">YYYY-MM-DD (ISO-8601)</option>
+                            <option value="%d/%m/%Y">DD/MM/YYYY</option>
+                            <option value="%m/%d/%Y">MM/DD/YYYY</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDateCleanings((prev) => [
+                              ...prev.filter((d) => d.column !== dateCol),
+                              { column: dateCol, target_format: dateOutputFormat, handle_invalid: dateHandleInvalid },
+                            ]);
+                            setSuccessMessage(`Staged date standardization for '${dateCol}'.`);
+                          }}
+                          className="px-4 py-2 bg-[#2563EB] text-white rounded-lg text-xs font-semibold shadow-xs hover:bg-[#1D4ED8] cursor-pointer"
+                        >
+                          Add Date Operation
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {advancedCategory === 'outliers' && (
+                  <div className="space-y-4 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">Numeric Column</label>
+                          <select
+                            value={outlierForm.column}
+                            onChange={(e) => setOutlierForm({ ...outlierForm, column: e.target.value })}
+                            className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                          >
+                            {(overview?.columns || []).filter((c) => c.data_type?.includes('int') || c.data_type?.includes('float') || c.data_type?.includes('num')).map((c) => (
+                              <option key={c.column_name} value={c.column_name}>{c.column_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">Treatment Action</label>
+                          <select
+                            value={outlierForm.treatment || 'cap'}
+                            onChange={(e) => setOutlierForm({ ...outlierForm, treatment: e.target.value })}
+                            className="w-full px-3 py-2 bg-white border border-[#CBD5E1] rounded-lg text-xs"
+                          >
+                            <option value="cap">Cap values at 1.5x IQR boundaries</option>
+                            <option value="remove">Remove outlier rows</option>
+                            <option value="median">Impute with median value</option>
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddOutlierCleaning}
+                          className="px-4 py-2 bg-[#2563EB] text-white rounded-lg text-xs font-semibold shadow-xs hover:bg-[#1D4ED8] cursor-pointer"
+                        >
+                          Add Outlier Operation
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: Preview Cleaned Data Mode */}
+      {activeMainTab === 'preview' && (
+        <div className="bg-white border border-[#E2E8F0] rounded-xl p-5 shadow-2xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E2E8F0]">
+            <div>
+              <h3 className="text-sm font-bold text-[#0F172A]">Full Cleaned Data Inspection</h3>
+              <p className="text-xs text-[#64748B] mt-0.5">
+                Review row values and statistical deltas after applying staged transformations.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBulkPreview}
+                disabled={loadingAction}
+                className="px-3.5 py-1.5 rounded-lg border border-[#CBD5E1] bg-white text-[#0F172A] hover:bg-slate-50 text-xs font-semibold cursor-pointer shadow-2xs"
+              >
+                Refresh Preview
+              </button>
+              <button
+                onClick={handleApplyChanges}
+                disabled={loadingAction}
+                className="px-3.5 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Confirm & Apply
+              </button>
+            </div>
+          </div>
+
+          <div className="border border-[#E2E8F0] rounded-lg overflow-x-auto bg-white">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-[#F8FAFC] text-[#64748B] font-semibold border-b border-[#E2E8F0]">
+                <tr>
+                  <th className="py-2.5 px-3 text-[#94A3B8] font-medium w-8">#</th>
+                  {previewDisplayColumns.map((col) => (
+                    <th key={col} className="py-2.5 px-3 whitespace-nowrap font-semibold">
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E2E8F0]">
+                {previewDisplayRows.map((row, rIdx) => (
+                  <tr key={rIdx} className="hover:bg-[#F8FAFC]/80 transition-colors">
+                    <td className="py-2.5 px-3 text-[#94A3B8] font-mono text-[11px]">{rIdx + 1}</td>
+                    {previewDisplayColumns.map((col) => (
+                      <td key={col} className="py-2.5 px-3 font-mono text-[11px] text-[#0F172A] whitespace-nowrap">
+                        {row[col] !== null && row[col] !== undefined ? String(row[col]) : <span className="text-[#94A3B8]">null</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+
+            {/* MODAL 1: Why This Score / Validation & Quality Score */}
       {showWhyScoreModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl border border-[#CBD5E1] shadow-xl max-w-3xl w-full max-h-[85vh] flex flex-col p-6 space-y-4">

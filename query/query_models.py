@@ -34,6 +34,7 @@ class QueryIntent(str, Enum):
     DUPLICATES = "DUPLICATES"
     DATA_TYPES = "DATA_TYPES"
     UNIQUE_VALUES = "UNIQUE_VALUES"
+    DATA_QUALITY_AUDIT = "DATA_QUALITY_AUDIT"
 
     # Temporal & Trend
     DATE_RANGE = "DATE_RANGE"
@@ -120,6 +121,9 @@ class StructuredQueryPlan:
     date_column: Optional[str] = None
     comparison: Optional[Dict[str, Any]] = None  # {"target": ..., "baseline": ..., "type": ...}
     output: Dict[str, bool] = field(default_factory=lambda: {"table": True, "chart": False})
+    derived_column: Optional[Dict[str, Any]] = None
+    filter_logic: str = "AND"
+    subquery: Optional[Dict[str, Any]] = None
     confidence: float = 1.0
     needs_clarification: bool = False
     clarification_question: Optional[str] = None
@@ -134,6 +138,8 @@ class StructuredQueryPlan:
             "secondary_dataset": self.secondary_dataset,
             "secondary_column": self.secondary_column,
             "filters": list(self.filters),
+            "filter_logic": self.filter_logic,
+            "subquery": dict(self.subquery) if self.subquery else None,
             "group_by": list(self.group_by),
             "aggregation": self.aggregation,
             "sort": self.sort,
@@ -144,6 +150,7 @@ class StructuredQueryPlan:
             "date_column": self.date_column,
             "comparison": dict(self.comparison) if self.comparison else None,
             "output": dict(self.output),
+            "derived_column": dict(self.derived_column) if self.derived_column else None,
             "confidence": self.confidence,
             "needs_clarification": self.needs_clarification,
             "clarification_question": self.clarification_question,
@@ -161,6 +168,8 @@ class StructuredQueryPlan:
             secondary_dataset=data.get("secondary_dataset"),
             secondary_column=data.get("secondary_column"),
             filters=data.get("filters", []),
+            filter_logic=data.get("filter_logic", "AND"),
+            subquery=data.get("subquery"),
             group_by=data.get("group_by", []),
             aggregation=data.get("aggregation"),
             sort=data.get("sort"),
@@ -171,6 +180,7 @@ class StructuredQueryPlan:
             date_column=data.get("date_column"),
             comparison=data.get("comparison"),
             output=output if isinstance(output, dict) else {"table": True, "chart": False},
+            derived_column=data.get("derived_column"),
             confidence=float(data.get("confidence", 1.0)),
             needs_clarification=bool(data.get("needs_clarification", False)),
             clarification_question=data.get("clarification_question"),

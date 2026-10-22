@@ -1229,15 +1229,15 @@ class DataCleaningService:
         cls,
         dataset: Dataset,
         operations: CleaningOperationsRequest,
-        current_user: User,
-        db: Session,
+        current_user: Optional[User] = None,
+        db: Optional[Session] = None,
     ) -> CleaningApplyResponse:
         """Execute cleaning pipeline, save versioned cleaned file, update DB, and log audit history."""
         orig_path = Path(dataset.file_path)
         if not orig_path.exists() or not orig_path.is_file():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Original dataset file '{dataset.filename}' not found on storage disk.",
+                detail=f"Original dataset file '{getattr(dataset, 'filename', 'dataset')}' not found on storage disk.",
             )
 
         before_df = cls._get_dataframe(dataset, active=False)
@@ -1246,27 +1246,64 @@ class DataCleaningService:
         cleaned_df, ops, _, detailed_ops, _, _, _ = cls.execute_cleaning_pipeline(before_df, operations)
         after_metrics = cls.calculate_metrics(cleaned_df)
 
-        if not ops:
+        has_configured_ops = any([
+            operations.remove_duplicates,
+            operations.remove_empty_rows,
+            operations.remove_empty_columns,
+            operations.convert_blanks_to_na,
+            operations.standardize_column_names,
+            bool(operations.missing_imputations),
+            bool(operations.type_conversions),
+            bool(operations.drop_columns),
+            bool(operations.text_standardizations),
+            bool(operations.category_normalizations),
+            bool(operations.numeric_cleanings),
+            bool(operations.date_cleanings),
+            bool(operations.value_validations),
+            bool(operations.custom_replacements),
+            bool(operations.find_replaces),
+            bool(operations.cleaning_rules),
+            bool(operations.outlier_cleanings),
+        ])
+
+        if not has_configured_ops:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No cleaning operations were selected to apply.",
             )
 
+        if not ops:
+            ops = ["Dataset verified against selected rules: 0 rows or cells required modification."]
+            detailed_ops.append(DetailedCleaningOperation(
+                operation="Verification",
+                column="All",
+                method="Rule Validation (0 modifications required)",
+                rows_affected=0,
+            ))
+
         _, total_cells_changed = cls._compute_cell_diffs(before_df, cleaned_df)
 
         # Establish isolated user output directory for cleaned artifact
-        user_dir = settings.UPLOAD_DIR / f"user_{current_user.id}"
+        user_id = current_user.id if current_user else getattr(dataset, "user_id", 1)
+        user_dir = settings.UPLOAD_DIR / f"user_{user_id}"
         user_dir.mkdir(parents=True, exist_ok=True)
 
-        base_stem = Path(dataset.stored_filename or dataset.filename).stem
-        existing_history_count = (
-            db.query(AnalysisHistory)
-            .filter(
-                AnalysisHistory.dataset_id == dataset.id,
-                AnalysisHistory.analysis_type == "cleaning",
-            )
-            .count()
-        )
+        stored_fn = getattr(dataset, "stored_filename", None) or getattr(dataset, "filename", "dataset.csv")
+        base_stem = Path(stored_fn).stem
+        existing_history_count = 0
+        if db is not None:
+            try:
+                existing_history_count = (
+                    db.query(AnalysisHistory)
+                    .filter(
+                        AnalysisHistory.dataset_id == dataset.id,
+                        AnalysisHistory.analysis_type == "cleaning",
+                    )
+                    .count()
+                )
+            except Exception:
+                existing_history_count = 0
+
         version_num = existing_history_count + 1
         version_tag = f"Cleaned v{version_num}"
         versioned_filename = f"cleaned_{base_stem}_v{version_num}.csv"
@@ -1296,53 +1333,55 @@ class DataCleaningService:
         score, deductions, c_status, s_status, comp_scores = cls.calculate_cleaning_score(cleaned_df, dataset, before_df=before_df)
         val_report = cls._run_validation_comparison(dataset, before_df, cleaned_df)
 
-        # Record in AnalysisHistory audit log
-        history_entry = AnalysisHistory(
-            user_id=current_user.id,
-            dataset_id=dataset.id,
-            dataset_name=dataset.filename,
-            query="Data Cleaning Execution",
-            analysis_type="cleaning",
-            result_json=json.dumps({
-                "version": version_tag,
-                "version_number": version_num,
-                "version_file": str(versioned_path),
-                "quality_score": score,
-                "score_status": s_status,
-                "component_scores": comp_scores,
-                "score_deductions": deductions,
-                "cleaning_status": c_status,
-                "validation_report": val_report.model_dump(),
-                "operations_performed": ops,
-                "detailed_operations": detailed_ops_dicts,
-                "before_rows": before_metrics.total_rows,
-                "after_rows": after_metrics.total_rows,
-                "before_missing": before_metrics.missing_cells,
-                "after_missing": after_metrics.missing_cells,
-                "before_duplicates": before_metrics.duplicate_rows,
-                "after_duplicates": after_metrics.duplicate_rows,
-                "cleaned_file": cleaned_filename,
-                "cells_affected": total_cells_changed,
-            }),
-            status="completed",
-        )
-        try:
-            db.add(history_entry)
-            db.commit()
-            db.refresh(dataset)
-            db.refresh(history_entry)
-            cls.clear_cache_for_dataset(dataset.id)
-        except Exception as e:
-            db.rollback()
-            if versioned_path.exists():
-                try:
-                    versioned_path.unlink()
-                except Exception:
-                    pass
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to persist dataset cleaning version: {str(e)}",
+        # Record in AnalysisHistory audit log if db and current_user are present
+        history_entry = None
+        if db is not None and current_user is not None:
+            history_entry = AnalysisHistory(
+                user_id=current_user.id,
+                dataset_id=dataset.id,
+                dataset_name=getattr(dataset, "filename", "dataset.csv"),
+                query="Data Cleaning Execution",
+                analysis_type="cleaning",
+                result_json=json.dumps({
+                    "version": version_tag,
+                    "version_number": version_num,
+                    "version_file": str(versioned_path),
+                    "quality_score": score,
+                    "score_status": s_status,
+                    "component_scores": comp_scores,
+                    "score_deductions": deductions,
+                    "cleaning_status": c_status,
+                    "validation_report": val_report.model_dump(),
+                    "operations_performed": ops,
+                    "detailed_operations": detailed_ops_dicts,
+                    "before_rows": before_metrics.total_rows,
+                    "after_rows": after_metrics.total_rows,
+                    "before_missing": before_metrics.missing_cells,
+                    "after_missing": after_metrics.missing_cells,
+                    "before_duplicates": before_metrics.duplicate_rows,
+                    "after_duplicates": after_metrics.duplicate_rows,
+                    "cleaned_file": cleaned_filename,
+                    "cells_affected": total_cells_changed,
+                }),
+                status="completed",
             )
+            try:
+                db.add(history_entry)
+                db.commit()
+                db.refresh(dataset)
+                db.refresh(history_entry)
+                cls.clear_cache_for_dataset(dataset.id)
+            except Exception as e:
+                db.rollback()
+                if versioned_path.exists():
+                    try:
+                        versioned_path.unlink()
+                    except Exception:
+                        pass
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to persist dataset cleaning version: {str(e)}",
+                )
 
         return CleaningApplyResponse(
             success=True,
@@ -1357,7 +1396,7 @@ class DataCleaningService:
             operations_performed=ops,
             detailed_operations=detailed_ops,
             applied_at=now_str,
-            history_id=history_entry.id,
+            history_id=history_entry.id if history_entry else None,
             rows_affected=rows_removed + min(total_cells_changed, len(cleaned_df)),
             cells_affected=total_cells_changed,
             columns_affected=cols_removed,

@@ -1,6 +1,5 @@
 """FastAPI router for multiple dataset relationship discovery, review, and safe joins."""
 
-from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 

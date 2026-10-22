@@ -25,7 +25,6 @@ import {
   TrendingUp,
   FileText,
   History,
-  Database,
   FileCheck2,
   HardDrive,
   Shield,

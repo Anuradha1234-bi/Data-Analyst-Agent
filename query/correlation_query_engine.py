@@ -48,44 +48,173 @@ def compute_correlation_query(
         s_a = pd.to_numeric(df[col_a], errors="coerce")
         s_b = pd.to_numeric(df[col_b], errors="coerce")
         valid_mask = s_a.notna() & s_b.notna()
-        if valid_mask.sum() < 3:
+        n_pairs = int(valid_mask.sum())
+        total_rows = len(df)
+        missing_pairs = total_rows - n_pairs
+
+        if n_pairs < 3:
             return {
                 "result_type": "empty",
                 "data": pd.DataFrame(),
                 "columns": [],
                 "row_count": 0,
-                "evidence": {"message": f"Insufficient non-null observations between '{col_a}' and '{col_b}' (minimum 3 required)."},
+                "evidence": {
+                    "message": f"Insufficient non-null observations between '{col_a}' and '{col_b}' (N={n_pairs}, minimum 3 required).",
+                    "valid_pairs": n_pairs,
+                    "total_rows": total_rows,
+                },
                 "warnings": [f"Not enough valid numerical pairs between '{col_a}' and '{col_b}'."],
             }
 
-        r_val = float(s_a[valid_mask].corr(s_b[valid_mask], method="pearson"))
-        if np.isnan(r_val):
-            r_val = 0.0
+        val_a = s_a[valid_mask]
+        val_b = s_b[valid_mask]
+        std_a = float(val_a.std(ddof=1)) if n_pairs > 1 else 0.0
+        std_b = float(val_b.std(ddof=1)) if n_pairs > 1 else 0.0
 
-        abs_r = abs(r_val)
-        strength = "Strong" if abs_r >= 0.70 else ("Moderate" if abs_r >= 0.40 else "Weak")
-        direction = "Positive" if r_val > 0 else "Negative"
+        alpha = 0.05
 
-        pair_row = {
-            "Feature A": col_a,
-            "Feature B": col_b,
-            "Correlation (r)": round(r_val, 4),
-            "Strength": strength,
-            "Direction": direction,
-        }
-        res_df = pd.DataFrame([pair_row])
+        if std_a == 0.0 or std_b == 0.0:
+            zero_var_cols = []
+            if std_a == 0.0: zero_var_cols.append(col_a)
+            if std_b == 0.0: zero_var_cols.append(col_b)
+            warn_msg = f"Standard deviation is 0.0 for column(s) {zero_var_cols} (constant values). Correlation is undefined."
+            summary_row = {
+                "Analysis Type": "Pearson & Spearman",
+                "Feature A": col_a,
+                "Feature B": col_b,
+                "Coefficient": 0.0,
+                "P-Value": "N/A",
+                "Statistically Significant (α=0.05)": "Undefined (Zero Variance)",
+                "Strength": "None",
+                "Direction": "None",
+                "Valid Pairs (N)": n_pairs,
+                "Relationship Evaluated": warn_msg,
+            }
+            res_df = pd.DataFrame([summary_row])
+            return {
+                "result_type": "table",
+                "data": res_df,
+                "columns": list(res_df.columns),
+                "row_count": 1,
+                "evidence": {
+                    "col_a": col_a,
+                    "col_b": col_b,
+                    "valid_pairs_n": n_pairs,
+                    "total_rows": total_rows,
+                    "missing_pairs": missing_pairs,
+                    "zero_variance_columns": zero_var_cols,
+                    "causation_warning": "Correlation does NOT establish causation. Associations reflect statistical covariance, not cause-and-effect.",
+                },
+                "warnings": [warn_msg],
+            }
+
+        # Calculate Pearson and Spearman using scipy.stats
+        try:
+            import scipy.stats as stats
+            p_res = stats.pearsonr(val_a, val_b)
+            r_val = float(p_res.statistic if hasattr(p_res, "statistic") else p_res[0])
+            p_pearson = float(p_res.pvalue if hasattr(p_res, "pvalue") else p_res[1])
+
+            s_res = stats.spearmanr(val_a, val_b)
+            rho_val = float(s_res.statistic if hasattr(s_res, "statistic") else s_res[0])
+            p_spearman = float(s_res.pvalue if hasattr(s_res, "pvalue") else s_res[1])
+        except Exception:
+            r_val = float(val_a.corr(val_b, method="pearson"))
+            rho_val = float(val_a.corr(val_b, method="spearman"))
+            p_pearson = 0.0
+            p_spearman = 0.0
+
+        if np.isnan(r_val): r_val = 0.0
+        if np.isnan(rho_val): rho_val = 0.0
+
+        sig_pearson = bool(p_pearson < alpha)
+        sig_spearman = bool(p_spearman < alpha)
+
+        def _get_strength(coeff: float) -> str:
+            abs_c = abs(coeff)
+            if abs_c >= 0.70: return "Strong"
+            if abs_c >= 0.40: return "Moderate"
+            if abs_c >= 0.20: return "Weak"
+            return "Negligible"
+
+        rows = [
+            {
+                "Analysis Type": "Pearson Correlation",
+                "Feature A": col_a,
+                "Feature B": col_b,
+                "Coefficient": round(r_val, 4),
+                "P-Value": round(p_pearson, 4) if p_pearson >= 0.0001 else "< 0.0001",
+                "Statistically Significant (α=0.05)": "Yes" if sig_pearson else "No",
+                "Strength": _get_strength(r_val),
+                "Direction": "Positive" if r_val > 0 else ("Negative" if r_val < 0 else "None"),
+                "Valid Pairs (N)": n_pairs,
+                "Relationship Evaluated": "Linear association",
+            },
+            {
+                "Analysis Type": "Spearman Rank Correlation",
+                "Feature A": col_a,
+                "Feature B": col_b,
+                "Coefficient": round(rho_val, 4),
+                "P-Value": round(p_spearman, 4) if p_spearman >= 0.0001 else "< 0.0001",
+                "Statistically Significant (α=0.05)": "Yes" if sig_spearman else "No",
+                "Strength": _get_strength(rho_val),
+                "Direction": "Positive" if rho_val > 0 else ("Negative" if rho_val < 0 else "None"),
+                "Valid Pairs (N)": n_pairs,
+                "Relationship Evaluated": "Monotonic association",
+            },
+        ]
+        res_df = pd.DataFrame(rows)
+
+        causation_text = (
+            "Correlation does NOT establish causation. A statistically significant correlation indicates an association "
+            "between the two variables, but does not prove that changes in one variable cause changes in the other. "
+            "Confounding factors, common underlying drivers, or coincidence may account for the relationship. "
+            "Furthermore, statistical significance (p < 0.05) demonstrates that the observed correlation is unlikely to be "
+            "a random artifact of sampling variation, but does not automatically imply practical or operational importance."
+        )
+
         evidence = {
+            "col_a": col_a,
+            "col_b": col_b,
+            "pearson_r": round(r_val, 4),
+            "pearson_p_value": float(p_pearson),
+            "pearson_significant": sig_pearson,
+            "spearman_rho": round(rho_val, 4),
+            "spearman_p_value": float(p_spearman),
+            "spearman_significant": sig_spearman,
+            "valid_pairs_n": n_pairs,
+            "total_rows": total_rows,
+            "missing_pairs": missing_pairs,
+            "significance_threshold_alpha": alpha,
+            "mean_a": round(float(val_a.mean()), 2),
+            "std_a": round(std_a, 2),
+            "mean_b": round(float(val_b.mean()), 2),
+            "std_b": round(std_b, 2),
             "pairs_analyzed": 1,
-            "strongest_pair": pair_row,
-            "causation_warning": "Correlation does NOT imply causation. Associations reflect statistical covariance, not cause-and-effect.",
+            "strongest_pair": rows[0],
+            "causation_warning": causation_text,
+            "summary_table": rows,
         }
+
         return {
             "result_type": "table",
             "data": res_df,
             "columns": list(res_df.columns),
-            "row_count": 1,
+            "row_count": len(res_df),
             "evidence": evidence,
             "warnings": [],
+        }
+
+    if col_a and not col_b:
+        return {
+            "result_type": "empty",
+            "data": pd.DataFrame(),
+            "columns": [],
+            "row_count": 0,
+            "evidence": {
+                "message": f"Requested correlation for '{col_a}', but could not resolve a second numerical column. Please specify a second numeric column."
+            },
+            "warnings": [f"Secondary column for correlation analysis with '{col_a}' is missing."],
         }
 
     # Numeric columns in dataset

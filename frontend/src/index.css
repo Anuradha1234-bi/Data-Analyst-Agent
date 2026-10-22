@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-primary: #2563EB;
   --color-primary-dark: #1D4ED8;
@@ -30,8 +32,21 @@
   --warning: #D97706;
   --error: #DC2626;
   --sidebar-bg: #0F172A;
+  color-scheme: light;
 }
 
+html.dark {
+  --bg-main: #070D1E;
+  --card-bg: #0F172A;
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --border-color: #1E293B;
+  --sidebar-bg: #0B132B;
+  color-scheme: dark;
+}
+
+/* Base Body Styles */
 body {
   background-color: #F8FAFC;
   color: #0F172A;
@@ -43,3 +58,196 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Smooth transition for theme switching without UI lag */
+body,
+main,
+header,
+footer,
+nav,
+aside,
+input,
+select,
+textarea,
+button,
+table,
+th,
+td {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* =============================================================================
+   DARK MODE COMPREHENSIVE OVERRIDES
+============================================================================= */
+
+/* Page & Layout Backgrounds */
+html.dark body {
+  background-color: #070D1E !important;
+  color: #F8FAFC !important;
+}
+
+html.dark main,
+html.dark .bg-\[\#F4F6F9\],
+html.dark .bg-\[\#F8FAFC\],
+html.dark .bg-\[\#F1F5F9\] {
+  background-color: #070D1E !important;
+}
+
+/* Cards & Elevated Panels */
+html.dark .bg-white {
+  background-color: #0F172A !important;
+}
+
+/* Inner Subtle Containers & Staging Areas */
+html.dark .bg-slate-50,
+html.dark .bg-slate-100 {
+  background-color: #131F3F !important;
+}
+
+/* Borders & Dividers */
+html.dark .border-\[\#E2E8F0\],
+html.dark .border-\[\#E5E9F0\],
+html.dark .border-\[\#CBD5E1\],
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1E293B !important;
+}
+
+/* Headings & High-Contrast Typography */
+html.dark .text-\[\#0F172A\],
+html.dark .text-slate-900,
+html.dark .text-slate-800 {
+  color: #F8FAFC !important;
+}
+
+/* Body & Medium-Contrast Typography */
+html.dark .text-\[\#334155\],
+html.dark .text-\[\#475569\],
+html.dark .text-slate-700 {
+  color: #CBD5E1 !important;
+}
+
+/* Secondary & Muted Typography */
+html.dark .text-\[\#64748B\],
+html.dark .text-slate-500,
+html.dark .text-slate-600 {
+  color: #94A3B8 !important;
+}
+
+/* Form Inputs, Selects & Textareas */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+html.dark select,
+html.dark textarea {
+  background-color: #131F3F !important;
+  border-color: #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748B !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #2563EB !important;
+  outline: none;
+}
+
+/* Data Tables */
+html.dark table th {
+  background-color: #131F3F !important;
+  color: #F8FAFC !important;
+  border-color: #1E293B !important;
+}
+
+html.dark table td {
+  border-color: #1E293B !important;
+  color: #CBD5E1 !important;
+}
+
+html.dark table tbody tr:hover td {
+  background-color: #182852 !important;
+}
+
+/* Status Badges & Alert Chips in Dark Mode */
+html.dark .bg-\[\#EFF6FF\],
+html.dark .bg-blue-50 {
+  background-color: rgba(30, 58, 138, 0.35) !important;
+  border-color: rgba(37, 99, 235, 0.4) !important;
+  color: #60A5FA !important;
+}
+
+html.dark .bg-\[\#ECFDF5\],
+html.dark .bg-\[\#EBFDF2\],
+html.dark .bg-emerald-50,
+html.dark .bg-green-50 {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  color: #34D399 !important;
+}
+
+html.dark .bg-\[\#FFFBEB\],
+html.dark .bg-amber-50,
+html.dark .bg-yellow-50 {
+  background-color: rgba(120, 53, 15, 0.35) !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+  color: #FBBF24 !important;
+}
+
+html.dark .bg-\[\#FEF2F2\],
+html.dark .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.35) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #F87171 !important;
+}
+
+html.dark .bg-\[\#FAF5FF\],
+html.dark .bg-purple-50 {
+  background-color: rgba(88, 28, 135, 0.35) !important;
+  border-color: rgba(168, 85, 247, 0.4) !important;
+  color: #C084FC !important;
+}
+
+/* Subtle Shadows in Dark Mode */
+html.dark .shadow-xs,
+html.dark .shadow-sm,
+html.dark .shadow-md,
+html.dark .shadow-lg,
+html.dark .shadow-2xs {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45) !important;
+}
+
+/* SVG Chart Grids and Text */
+html.dark svg line[stroke="#F1F5F9"],
+html.dark svg line[stroke="#E2E8F0"] {
+  stroke: #1E293B !important;
+}
+
+html.dark svg text.fill-\[\#64748B\],
+html.dark svg text.fill-\[\#94A3B8\] {
+  fill: #94A3B8 !important;
+}
+
+/* Custom Dark Scrollbar */
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #070D1E;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #1E293B;
+  border-radius: 4px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}

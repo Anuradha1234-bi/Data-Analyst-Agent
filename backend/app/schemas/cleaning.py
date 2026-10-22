@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # =============================================================================
@@ -40,6 +40,19 @@ class CategoryNormalizationConfig(BaseModel):
     column: str
     mapping: Dict[str, str] = Field(default_factory=dict)  # { "M": "Male", "male": "Male" }
 
+    @property
+    def mappings(self) -> Dict[str, str]:
+        return self.mapping
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "mappings" in data and "mapping" not in data:
+                data = dict(data)
+                data["mapping"] = data["mappings"]
+        return data
+
 
 class NumericCleaningConfig(BaseModel):
     """Numeric value cleaning for currency, commas, and percentage handling."""
@@ -55,6 +68,19 @@ class DateCleaningConfig(BaseModel):
     column: str
     output_format: Optional[str] = "%Y-%m-%d"  # "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", etc.
     handle_invalid: str = "coerce_na"  # "coerce_na", "keep"
+
+    @property
+    def target_format(self) -> Optional[str]:
+        return self.output_format
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "target_format" in data and "output_format" not in data:
+                data = dict(data)
+                data["output_format"] = data["target_format"]
+        return data
 
 
 class ValueValidationConfig(BaseModel):
@@ -99,6 +125,28 @@ class OutlierCleaningConfig(BaseModel):
     multiplier: float = 1.5  # 1.5 for IQR, 3.0 for z-score
     action: str = "cap"  # "keep", "remove", "cap", "median", "mean"
 
+    @property
+    def threshold(self) -> float:
+        return self.multiplier
+
+    @property
+    def treatment(self) -> str:
+        return self.action
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if "threshold" in data and "multiplier" not in data:
+                try:
+                    data["multiplier"] = float(data["threshold"])
+                except (ValueError, TypeError):
+                    data["multiplier"] = 1.5
+            if "treatment" in data and "action" not in data:
+                data["action"] = str(data["treatment"])
+        return data
+
 
 # =============================================================================
 # Combined Cleaning Operations Request (Phase 1, 2, 3, 4)
@@ -128,6 +176,37 @@ class CleaningOperationsRequest(BaseModel):
 
     # Phase 3 & 4: Outlier Cleaning
     outlier_cleanings: List[OutlierCleaningConfig] = Field(default_factory=list)
+
+    @property
+    def missing_values(self) -> List[MissingImputationConfig]:
+        return self.missing_imputations
+
+    @property
+    def categories(self) -> List[CategoryNormalizationConfig]:
+        return self.category_normalizations
+
+    @property
+    def dates(self) -> List[DateCleaningConfig]:
+        return self.date_cleanings
+
+    @property
+    def outliers(self) -> List[OutlierCleaningConfig]:
+        return self.outlier_cleanings
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_request_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if "missing_values" in data and "missing_imputations" not in data:
+                data["missing_imputations"] = data["missing_values"]
+            if "categories" in data and "category_normalizations" not in data:
+                data["category_normalizations"] = data["categories"]
+            if "dates" in data and "date_cleanings" not in data:
+                data["date_cleanings"] = data["dates"]
+            if "outliers" in data and "outlier_cleanings" not in data:
+                data["outlier_cleanings"] = data["outliers"]
+        return data
 
 
 

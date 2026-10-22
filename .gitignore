@@ -47,11 +47,18 @@ htmlcov/
 *.sqlite3
 *.qa_backup
 *.bak
+*.bak*
 *.backup
 *.dump
+backups/
 backend/data_analyst.db*
 data_analyst.db*
 test_prediction_tmp.db*
+
+# Local test scratch CSVs
+browser_test_dirty_employees.csv
+sample_test_data.csv
+verify_*.csv
 
 # Uploaded Datasets Storage & User Data
 uploads/

@@ -25,9 +25,20 @@ from app.schemas.analysis import (
 )
 from app.schemas.profiling import DatasetProfileResponse
 from app.schemas.relationship import RelationshipItem
+from app.schemas.quality import DataQualityResponse
+from app.schemas.cleaning import CleaningOverviewResponse
+from app.schemas.analytics import AnalyticsOverviewResponse, AnalyticsInsightsResponse
+from app.schemas.anomaly import AnomalyDetectRequest, AnomalyDetectResponse
+from app.schemas.analysis import DatasetPipelineExecutionResult
+
 from app.services.profiling_service import ProfilingService
+from app.services.quality_service import DataQualityService
+from app.services.cleaning_service import DataCleaningService
+from app.services.analytics_service import AnalyticsService
+from app.services.anomaly_service import AnomalyService
 from services.relationship_detector import RelationshipDetector
 from utils.file_loader import FileLoader
+
 
 
 def _normalize_name(name: str) -> str:
@@ -106,6 +117,12 @@ class MultiDatasetAnalysisService:
 
         errors: List[DatasetAnalysisError] = []
         individual_profiles: Dict[int, DatasetProfileResponse] = {}
+        individual_quality: Dict[int, DataQualityResponse] = {}
+        individual_cleaning: Dict[int, CleaningOverviewResponse] = {}
+        individual_analytics: Dict[int, AnalyticsOverviewResponse] = {}
+        individual_anomalies: Dict[int, AnomalyDetectResponse] = {}
+        individual_insights: Dict[int, AnalyticsInsightsResponse] = {}
+        dataset_pipeline_results: Dict[int, DatasetPipelineExecutionResult] = {}
         loaded_dfs: Dict[str, pd.DataFrame] = {}
         summary_items: List[DatasetSummaryItem] = []
 
@@ -120,7 +137,7 @@ class MultiDatasetAnalysisService:
                     )
                 )
 
-        # 3. Profile each found dataset individually with isolated try/except
+        # 3. Process each found dataset independently through all applicable phases
         for ds in db_datasets:
             ds_name = ds.original_filename or ds.filename or f"dataset_{ds.id}"
             try:
@@ -136,7 +153,7 @@ class MultiDatasetAnalysisService:
                     )
                     continue
 
-                # Load DataFrame
+                # Phase 1: Load and validate DataFrame
                 load_res = FileLoader.load_file(
                     file_obj=str(fpath),
                     filename=ds.filename,
@@ -153,12 +170,90 @@ class MultiDatasetAnalysisService:
                     )
                     continue
 
-                # Compute Profile
+                phases_completed: List[str] = ["loading"]
+                phase_notes: Dict[str, str] = {}
+                pipeline_status = "completed"
+
+                # Phase 2: Data Profiling & Column Type Detection
                 profile = ProfilingService.get_dataset_profile(ds)
                 individual_profiles[ds.id] = profile
                 loaded_dfs[ds_name] = load_res.df
+                phases_completed.append("profiling")
 
-                # Count semantic column distributions
+                # Phase 3: Data Quality Assessment (Missing values, Duplicates, Integrity)
+                quality = None
+                try:
+                    quality = DataQualityService.analyze_dataset_quality(ds)
+                    individual_quality[ds.id] = quality
+                    phases_completed.append("quality")
+                except Exception as q_err:
+                    pipeline_status = "partial"
+                    phase_notes["quality"] = f"Quality assessment notice: {str(q_err)}"
+
+                # Phase 4: Data Cleaning & Preprocessing Diagnostics (Smart suggestions, previews)
+                cleaning = None
+                try:
+                    cleaning = DataCleaningService.get_cleaning_overview(ds, db)
+                    individual_cleaning[ds.id] = cleaning
+                    phases_completed.append("cleaning")
+                except Exception as c_err:
+                    pipeline_status = "partial"
+                    phase_notes["cleaning"] = f"Cleaning diagnostics notice: {str(c_err)}"
+
+                # Phase 5: Statistical Summaries, Descriptive Analytics & Dynamic KPIs
+                analytics = None
+                try:
+                    analytics = AnalyticsService.get_analytics_overview(ds.id, "original", current_user, db)
+                    individual_analytics[ds.id] = analytics
+                    phases_completed.append("analytics")
+                except Exception as a_err:
+                    pipeline_status = "partial"
+                    phase_notes["analytics"] = f"Analytics overview notice: {str(a_err)}"
+
+                # Phase 6: Outlier and Anomaly Detection (IQR on numeric features)
+                anomalies = None
+                try:
+                    numeric_cols = [c for c in load_res.df.columns if pd.api.types.is_numeric_dtype(load_res.df[c])]
+                    if len(numeric_cols) > 0 and len(load_res.df) >= 4:
+                        anomalies = AnomalyService.detect_anomalies(
+                            db=db,
+                            current_user=current_user,
+                            request=AnomalyDetectRequest(dataset_id=ds.id, method="iqr"),
+                        )
+                        individual_anomalies[ds.id] = anomalies
+                        phases_completed.append("anomalies")
+                    else:
+                        phase_notes["anomalies"] = "Outlier detection not applicable: dataset has no numerical features or fewer than 4 records."
+                except Exception as an_err:
+                    pipeline_status = "partial"
+                    phase_notes["anomalies"] = f"Anomaly detection notice: {str(an_err)}"
+
+                # Phase 7: Dataset-Specific Evidence-Grounded Automated Insights
+                insights_resp = None
+                try:
+                    insights_resp = AnalyticsService.generate_insights(ds.id, "original", current_user, db)
+                    individual_insights[ds.id] = insights_resp
+                    phases_completed.append("insights")
+                except Exception as ins_err:
+                    pipeline_status = "partial"
+                    phase_notes["insights"] = f"Insights generation notice: {str(ins_err)}"
+
+                # Record unified dataset pipeline result
+                dataset_pipeline_results[ds.id] = DatasetPipelineExecutionResult(
+                    dataset_id=ds.id,
+                    name=ds_name,
+                    status=pipeline_status,
+                    phases_completed=phases_completed,
+                    profile=profile,
+                    quality=quality,
+                    cleaning=cleaning,
+                    analytics=analytics,
+                    anomalies=anomalies,
+                    insights=insights_resp,
+                    phase_notes=phase_notes,
+                )
+
+                # Count semantic column distributions for combined summary
                 num_count = sum(1 for c in profile.columns if c.semantic_type == "NUMERIC")
                 cat_count = sum(1 for c in profile.columns if c.semantic_type in ("CATEGORICAL", "TEXT"))
                 dt_count = sum(1 for c in profile.columns if c.semantic_type == "DATETIME")
@@ -188,7 +283,7 @@ class MultiDatasetAnalysisService:
                     DatasetAnalysisError(
                         dataset_id=ds.id,
                         dataset_name=ds_name,
-                        error=f"Profiling error: {str(e)}",
+                        error=f"Processing pipeline error: {str(e)}",
                     )
                 )
 
@@ -206,6 +301,12 @@ class MultiDatasetAnalysisService:
                 total_failed=total_failed,
                 errors=errors,
                 individual_profiles={},
+                individual_quality={},
+                individual_cleaning={},
+                individual_analytics={},
+                individual_anomalies={},
+                individual_insights={},
+                dataset_pipeline_results={},
                 combined_overview=None,
                 comparison=None,
                 relationships=[],
@@ -293,11 +394,18 @@ class MultiDatasetAnalysisService:
             total_failed=total_failed,
             errors=errors,
             individual_profiles=individual_profiles,
+            individual_quality=individual_quality,
+            individual_cleaning=individual_cleaning,
+            individual_analytics=individual_analytics,
+            individual_anomalies=individual_anomalies,
+            individual_insights=individual_insights,
+            dataset_pipeline_results=dataset_pipeline_results,
             combined_overview=combined_overview,
             comparison=comparison,
             relationships=relationships_list,
             cross_dataset_insights=insights,
         )
+
 
     @classmethod
     def _compare_datasets_internal(

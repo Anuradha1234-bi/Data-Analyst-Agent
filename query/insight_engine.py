@@ -30,12 +30,20 @@ class InsightEngine:
         if df is None or df.empty:
             return insights
 
-        num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-        cat_cols = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_datetime64_any_dtype(df[c])]
+        from query.column_resolver import filter_metadata_columns, is_metadata_column
+        all_num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        all_cat_cols = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_datetime64_any_dtype(df[c])]
+
+        # Prioritize domain columns over extraction metadata (PDF_Page, Line_Number, bbox)
+        domain_num_cols = filter_metadata_columns(all_num_cols)
+        domain_cat_cols = [c for c in all_cat_cols if not is_metadata_column(c)]
+
+        num_cols = domain_num_cols if domain_num_cols else (all_num_cols if (target_column and target_column in all_num_cols) else [])
+        cat_cols = domain_cat_cols if domain_cat_cols else (all_cat_cols if (group_column and group_column in all_cat_cols) else [])
 
         # Default columns if not specified
-        primary_num = target_column if (target_column in num_cols) else (num_cols[0] if num_cols else None)
-        primary_cat = group_column if (group_column in cat_cols) else (cat_cols[0] if cat_cols else None)
+        primary_num = target_column if (target_column in all_num_cols) else (domain_num_cols[0] if domain_num_cols else None)
+        primary_cat = group_column if (group_column in all_cat_cols) else (domain_cat_cols[0] if domain_cat_cols else None)
 
         # -------------------------------------------------------------
         # 1. Pareto / Concentration Insight (Top Categories vs Total)

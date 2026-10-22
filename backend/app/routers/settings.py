@@ -1,6 +1,5 @@
 """Settings Router - Application configuration, user preferences, API key management, and quotas."""
 
-from typing import Optional
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 

@@ -157,28 +157,52 @@ class ConversationContextManager:
                 augmented_q = f"{orig_q} (using '{selected_col}')"
                 return augmented_q, modified_plan
 
-        # 1. Limit modification follow-up: e.g. "Now show only the top 5", "Now show the top 10", "top 10", "change to top 3"
+        # Pre-process number words in conversational questions: "compare the top three" -> "top 3"
+        word_to_num = {
+            r"\bone\b": "1", r"\btwo\b": "2", r"\bthree\b": "3", r"\bfour\b": "4",
+            r"\bfive\b": "5", r"\bsix\b": "6", r"\bseven\b": "7", r"\beight\b": "8",
+            r"\bnine\b": "9", r"\bten\b": "10",
+        }
+        q_norm_words = q_lower
+        for pat, rep in word_to_num.items():
+            if re.search(r"\b(?:top|bottom|first|last|compare)\s+" + pat, q_norm_words):
+                q_norm_words = re.sub(pat, rep, q_norm_words)
+
+        # 1. Rank offset follow-up: e.g. "Show only the second one", "Show the 2nd one", "What about the second one"
+        match_rank_offset = re.search(r"\b(?:show\s+(?:only\s+)?(?:the\s+)?|what\s+about\s+(?:the\s+)?)(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th)\s*(?:one|item|product|market|row|record)?\b", q_lower)
+        if match_rank_offset:
+            rank_word = match_rank_offset.group(1).lower()
+            rank_map = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
+            offset_val = rank_map.get(rank_word, 1)
+            modified_plan = dict(prev_plan)
+            modified_plan["limit"] = 1
+            modified_plan["offset"] = offset_val
+            modified_plan["metadata"]["follow_up"] = True
+            augmented_q = f"Show the {rank_word} item ranked by {prev_metric or 'measure'}"
+            return augmented_q, modified_plan
+
+        # 2. Limit modification follow-up: e.g. "Now show only the top 5", "Compare the top three", "Now show the top 10", "top 10", "change to top 3"
         is_filter_query = any(w in q_lower for w in ["where", "greater", "less", "above", "below", ">", "<", "==", "!=", "between"])
         has_explicit_by = " by " in q_lower
         prev_intent = str(prev_plan.get("intent", "")).upper()
         if not is_filter_query and not has_explicit_by and prev_intent in ("TOP_N", "BOTTOM_N", "GROUP_BY", "FILTER", "SORT", "SHOW_DATA"):
             match_limit = (
-                re.search(r"^(?:now\s+)?(?:show\s+)?(?:only\s+)?(?:the\s+)?(?:top|bottom|first|last)\s+(\d+)\b", q_lower) or
-                re.search(r"\b(?:top|bottom|first|last|limit\s+to|show\s+top|show\s+bottom)\s+(\d+)\b", q_lower) or
-                re.search(r"^(?:now\s+)?(?:show\s+)?(?:only\s+)?(?:the\s+)?(\d+)\s*(?:records|rows|items)?$", q_lower)
+                re.search(r"\b(?:top|bottom|first|last|limit\s+to|show\s+top|show\s+bottom|compare\s+(?:the\s+)?top)\s*(\d+)\b", q_norm_words) or
+                re.search(r"^(?:now\s+)?(?:show\s+)?(?:only\s+)?(?:the\s+)?(\d+)\s*(?:records|rows|items)?$", q_norm_words)
             )
             if match_limit:
                 new_limit = int(match_limit.group(1))
                 modified_plan = dict(prev_plan)
                 modified_plan["limit"] = new_limit
+                modified_plan["offset"] = None
                 if "bottom" in q_lower:
                     modified_plan["intent"] = "BOTTOM_N"
-                elif "top" in q_lower:
+                else:
                     modified_plan["intent"] = "TOP_N"
                 augmented_q = f"Show top {new_limit} {prev_group or ''} by {prev_metric or ''}"
                 return augmented_q, modified_plan
 
-        # 2. Chart request follow-up: "Plot it as a bar chart", "Plot as line chart", "show as chart", "visualize this", "plot it"
+        # 3. Chart request follow-up: "Now show it as a chart", "Plot it as a bar chart", "Plot as line chart", "show as chart", "visualize this", "plot it"
         if any(term in q_lower for term in ["plot", "chart", "visualize", "graph"]):
             modified_plan = dict(prev_plan)
             modified_plan["output"] = {"table": True, "chart": True}
@@ -199,13 +223,38 @@ class ConversationContextManager:
                 modified_plan["preferred_chart_type"] = preferred_chart
             return f"Chart visualization for {context.get('previous_question', question)}", modified_plan
 
-        # 3. Filter follow-up: e.g. "Filter only records from September", "Filter by September", "Only records from September"
+        # 4. Temporal shift follow-up: "What about the previous month?", "Compare with previous month"
+        MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+        if any(k in q_lower for k in ["previous month", "prior month", "last month", "preceding month"]):
+            modified_plan = dict(prev_plan)
+            existing_filters = list(prev_plan.get("filters", []))
+            prev_month_val = None
+            for f in existing_filters:
+                if f.get("operator") == "month":
+                    prev_month_val = str(f.get("value")).lower()
+                    break
+            if prev_month_val and prev_month_val in MONTHS:
+                idx = MONTHS.index(prev_month_val)
+                prev_m = MONTHS[(idx - 1) % 12].title()
+            else:
+                prev_m = "August"
+            new_filters = [f for f in existing_filters if f.get("operator") != "month"]
+            date_col = prev_plan.get("date_column") or "Date"
+            new_filters.append({
+                "column": date_col,
+                "operator": "month",
+                "value": prev_m,
+            })
+            modified_plan["filters"] = new_filters
+            augmented_q = f"{context.get('previous_question', '')} (filtered for {prev_m})"
+            return augmented_q, modified_plan
+
+        # 5. Filter follow-up: e.g. "Filter only records from September", "Filter by September", "Only records from September"
         # or "Filter only for Pune", "Filter where Market is Pune"
         if any(q_lower.startswith(prefix) for prefix in ["filter only", "filter by", "filter for", "only records", "just records", "filter records", "filter where"]):
             modified_plan = dict(prev_plan)
             existing_filters = list(prev_plan.get("filters", []))
 
-            MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
             found_month = None
             for m in MONTHS:
                 if m in q_lower:
@@ -235,7 +284,7 @@ class ConversationContextManager:
                     augmented_q = f"{context.get('previous_question', '')} (filtered for {ent})"
                     return augmented_q, modified_plan
 
-        # 4. Sorting follow-up: e.g. "Now sort descending", "Sort ascending", "Now sort it descending"
+        # 6. Sorting follow-up: e.g. "Now sort descending", "Sort ascending", "Now sort it descending"
         if any(term in q_lower for term in ["sort descending", "sort ascending", "sort it descending", "sort it ascending", "now sort"]):
             modified_plan = dict(prev_plan)
             sort_dir = "descending" if "desc" in q_lower else "ascending"
@@ -244,7 +293,7 @@ class ConversationContextManager:
             augmented_q = f"{context.get('previous_question', '')} (sorted {sort_dir})"
             return augmented_q, modified_plan
 
-        # 5. Entity reference follow-up: e.g. "Compare their trends", "show trends for those products"
+        # 7. Entity reference follow-up: e.g. "Compare their trends", "show trends for those products"
         if any(term in q_lower for term in ["their", "those", "these", "them"]) and prev_entities and prev_group:
             modified_plan = dict(prev_plan)
             modified_plan["intent"] = "TREND"
@@ -258,7 +307,7 @@ class ConversationContextManager:
             augmented_q = f"Show trend for {prev_group} in {prev_entities[:3]} over time"
             return augmented_q, modified_plan
 
-        # 6. Pronoun reference replacement: e.g. "What is the average of that column?", "Show it"
+        # 8. Pronoun reference replacement: e.g. "What is the average of that column?", "Show it"
         if "that column" in q_lower and prev_metric:
             augmented_q = re.sub(r"\bthat\s+column\b", prev_metric, question, flags=re.IGNORECASE)
             return augmented_q, None
@@ -266,13 +315,22 @@ class ConversationContextManager:
         if q_lower in ("show it", "show it again", "show data"):
             return context.get("previous_question", question), prev_plan
 
-        # 7. Ambiguous short follow-up check:
-        if len(q_lower.split()) <= 2 and q_lower in ("why", "why?", "explain", "more", "what else?", "and?", "so what?"):
+        # 9. Conversational explanations: "Why?", "Explain in simple words."
+        if q_lower in ("why", "why?", "explain", "explain in simple words", "explain in simple words.", "explain simply", "explain in plain english", "simple words"):
+            modified_plan = dict(prev_plan)
+            modified_plan["intent"] = "INSIGHT_SUMMARY"
+            modified_plan["metadata"] = dict(modified_plan.get("metadata", {}))
+            modified_plan["metadata"]["explain_simple"] = True
+            augmented_q = f"Explain the key drivers and findings for: {context.get('previous_question', question)}"
+            return augmented_q, modified_plan
+
+        # 10. Ambiguous short follow-up check:
+        if len(q_lower.split()) <= 2 and q_lower in ("more", "what else?", "and?", "so what?"):
             clarif_plan = {
                 "intent": "UNKNOWN",
                 "needs_clarification": True,
-                "clarification_question": "Could you please specify your analytical question? For example: 'Now show top 10', 'Plot as bar chart', 'Filter only September', or 'Now sort descending'.",
-                "clarification_options": ["Now show top 10", "Plot as bar chart", "Filter only September", "Now sort descending"],
+                "clarification_question": "Could you please specify your analytical question? For example: 'Compare the top three', 'Show only the second one', 'What about the previous month?', or 'Now show it as a chart'.",
+                "clarification_options": ["Compare the top three", "Show only the second one", "What about the previous month?", "Now show it as a chart"],
                 "confidence": 0.5,
             }
             return question, clarif_plan

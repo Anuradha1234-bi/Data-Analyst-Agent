@@ -1,7 +1,7 @@
 """Pydantic schemas for Phase 8 Data Analyst Module (Natural Language Data Analysis)."""
 
-from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, model_validator
 
 
 class AnalysisAskRequest(BaseModel):
@@ -16,6 +16,23 @@ class AnalysisAskRequest(BaseModel):
         default=None,
         description="Optional conversation context for follow-up questions."
     )
+    dataset_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Optional list of dataset IDs for multi-dataset or cross-dataset questions."
+    )
+    secondary_dataset_id: Optional[int] = Field(
+        default=None,
+        description="Optional secondary dataset ID for cross-dataset analysis."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            if "query" in data and "question" not in data:
+                data["question"] = data["query"]
+        return data
 
 
 class AnalysisResultItem(BaseModel):
